@@ -169,7 +169,11 @@ func (this *Server) Put(resp http.ResponseWriter, req *http.Request) {
 		this.sendError(resp, NewError(http.StatusBadRequest, "ID Mismatch"))
 		return
 	}
-	table.Put(reqJson)
+	err = table.Put(reqJson)
+	if err != nil {
+		this.sendError(resp, err)
+		return
+	}
 }
 
 func (this *Server) Get(resp http.ResponseWriter, req *http.Request) {
@@ -229,12 +233,15 @@ func (this *Environment) getTable(name string, create bool) (*Table, *Error) {
 	return table, nil
 }
 
-func (this *Table) Put(newRecord *Record) {
+func (this *Table) Put(newRecord *Record) *Error {
 	this.mutex.Lock()
 	defer this.mutex.Unlock()
 	primary := this.getIndex("_id")
 	record, ok := primary.index[newRecord.Id]
 	if ok {
+		if newRecord.Rev != "" && newRecord.Rev != record.Rev {
+			return NewError(http.StatusConflict, "Document update conflict")
+		}
 		this.removeKeys(record)
 		record.Rev = newRecord.Rev
 		record.Doc = newRecord.Doc
@@ -243,6 +250,7 @@ func (this *Table) Put(newRecord *Record) {
 		primary.index[record.Id] = record
 	}
 	this.addKeys(record)
+	return nil
 }
 
 func (this *Table) Get(indexName, indexValue string) (*Record, *Error) {
