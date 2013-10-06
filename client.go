@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"github.com/flaub/kissdif/driver"
 	"io/ioutil"
 	"net/http"
 )
@@ -46,7 +47,7 @@ func (this *KissClient) GetWithIndex(indexName string, indexValue string) ([]byt
 	return result, nil
 }
 
-func (this *KissClient) Put(record *Record) error {
+func (this *KissClient) Put(record *driver.Record) error {
 	var buf bytes.Buffer
 	err := json.NewEncoder(&buf).Encode(record)
 	if err != nil {

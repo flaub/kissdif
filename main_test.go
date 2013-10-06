@@ -1,6 +1,7 @@
 package main
 
 import (
+	"github.com/flaub/kissdif/driver"
 	"io/ioutil"
 	"net/http"
 	"net/http/httptest"
@@ -11,7 +12,7 @@ func TestServer(t *testing.T) {
 	ts := httptest.NewServer(NewServer().Server.Handler)
 	defer ts.Close()
 
-	res, err := http.Get(ts.URL + "/env/table/_id/1")
+	res, err := http.Get(ts.URL + "/mem/table/_id/1")
 	if err != nil {
 		t.Fatalf("Get failed: %v", err)
 	}
@@ -33,12 +34,12 @@ func TestBasic(t *testing.T) {
 	ts := httptest.NewServer(NewServer().Server.Handler)
 	defer ts.Close()
 
-	record := &Record{
+	record := &driver.Record{
 		Id:  "1",
 		Doc: []byte("Value"),
 	}
 
-	client := NewKissClient(ts.URL, "env", "table")
+	client := NewKissClient(ts.URL, "mem", "table")
 
 	err := client.Put(record)
 	if err != nil {
@@ -72,14 +73,14 @@ func TestIndex(t *testing.T) {
 	ts := httptest.NewServer(NewServer().Server.Handler)
 	defer ts.Close()
 
-	record := &Record{
+	record := &driver.Record{
 		Id:   "1",
 		Doc:  []byte("Value"),
 		Keys: make(map[string][]string),
 	}
 	record.Keys["by_name"] = []string{"Joe", "Bob"}
 
-	client := NewKissClient(ts.URL, "env", "table")
+	client := NewKissClient(ts.URL, "mem", "table")
 
 	err := client.Put(record)
 	if err != nil {
