@@ -32,11 +32,22 @@ type Driver interface {
 	GetTable(name string, create bool) (Table, *Error)
 }
 
+type Bound struct {
+	Inclusive bool
+	Value     string
+}
+
+type Query struct {
+	Index string
+	Lower *Bound
+	Upper *Bound
+	Limit int
+}
+
 type Table interface {
-	Get(indexName, indexValue string) (*Record, *Error)
+	Get(query *Query) (chan (*Record), *Error)
 	Put(record *Record) *Error
 	Delete(id string) *Error
-	Query() *Error
 }
 
 type Record struct {

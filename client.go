@@ -7,6 +7,8 @@ import (
 	"github.com/flaub/kissdif/driver"
 	"io/ioutil"
 	"net/http"
+	"net/url"
+	"strconv"
 )
 
 type KissClient struct {
@@ -23,28 +25,38 @@ func NewKissClient(baseUrl, env, table string) *KissClient {
 	}
 }
 
-func (this *KissClient) Get(id string) ([]byte, error) {
+func (this *KissClient) Query(query *driver.Query) (*ResultSet, error) {
+	args := url.Values{}
+	// args.Add("eq", key)
+	if query.Limit != 0 {
+		args.Set("limit", strconv.Itoa(query.Limit))
+	}
+	return nil, nil
+}
+
+func (this *KissClient) Get(id string) (*ResultSet, error) {
 	return this.GetWithIndex("_id", id)
 }
 
-func (this *KissClient) GetWithIndex(indexName string, indexValue string) ([]byte, error) {
-	url := fmt.Sprintf("%s/%s/%s/%s/%s", this.BaseUrl, this.Env, this.Table, indexName, indexValue)
-	res, err := http.Get(url)
+func (this *KissClient) GetWithIndex(index, key string) (*ResultSet, error) {
+	url := fmt.Sprintf("%s/%s/%s/%s/%s", this.BaseUrl, this.Env, this.Table, index, key)
+	resp, err := http.Get(url)
 	if err != nil {
 		return nil, err
 	}
+	defer resp.Body.Close()
 
-	result, err := ioutil.ReadAll(res.Body)
-	res.Body.Close()
-	if err != nil {
-		return nil, err
+	if resp.StatusCode != http.StatusOK {
+		body, err := ioutil.ReadAll(resp.Body)
+		if err != nil {
+			return nil, err
+		}
+		return nil, fmt.Errorf("%s", body)
 	}
 
-	if res.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("%s", result)
-	}
-
-	return result, nil
+	var result ResultSet
+	json.NewDecoder(resp.Body).Decode(&result)
+	return &result, nil
 }
 
 func (this *KissClient) Put(record *driver.Record) error {
@@ -61,18 +73,18 @@ func (this *KissClient) Put(record *driver.Record) error {
 	}
 	req.Header.Set("Content-Type", "application/json")
 
-	res, err := http.DefaultClient.Do(req)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	result, err := ioutil.ReadAll(resp.Body)
 	if err != nil {
 		return err
 	}
 
-	result, err := ioutil.ReadAll(res.Body)
-	res.Body.Close()
-	if err != nil {
-		return err
-	}
-
-	if res.StatusCode != http.StatusOK {
+	if resp.StatusCode != http.StatusOK {
 		return fmt.Errorf("%s", result)
 	}
 
@@ -86,18 +98,18 @@ func (this *KissClient) Delete(id string) error {
 		return err
 	}
 
-	res, err := http.DefaultClient.Do(req)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	result, err := ioutil.ReadAll(resp.Body)
 	if err != nil {
 		return err
 	}
 
-	result, err := ioutil.ReadAll(res.Body)
-	res.Body.Close()
-	if err != nil {
-		return err
-	}
-
-	if res.StatusCode != http.StatusOK {
+	if resp.StatusCode != http.StatusOK {
 		return fmt.Errorf("%s", result)
 	}
 
