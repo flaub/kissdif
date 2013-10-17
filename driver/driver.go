@@ -28,7 +28,14 @@ func Open(name string) (Driver, *Error) {
 	return driver, nil
 }
 
+type Dictionary map[string]string
+
 type Driver interface {
+	Configure(name string, config Dictionary) (Store, *Error)
+	Open(name string) (Store, *Error)
+}
+
+type Store interface {
 	GetTable(name string, create bool) (Table, *Error)
 }
 

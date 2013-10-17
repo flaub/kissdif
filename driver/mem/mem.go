@@ -12,6 +12,11 @@ import (
 )
 
 type Driver struct {
+	stores map[string]*Store
+	mutex  sync.RWMutex
+}
+
+type Store struct {
 	tables map[string]*Table
 	mutex  sync.RWMutex
 }
@@ -42,11 +47,27 @@ func init() {
 
 func NewDriver() *Driver {
 	return &Driver{
-		tables: make(map[string]*Table),
+		stores: make(map[string]*Store),
 	}
 }
 
-func (this *Driver) GetTable(name string, create bool) (driver.Table, *driver.Error) {
+func (this *Driver) Configure(name string, config driver.Dictionary) (driver.Store, *driver.Error) {
+	store := &Store{
+		tables: make(map[string]*Table),
+	}
+	this.stores[name] = store
+	return store, nil
+}
+
+func (this *Driver) Open(name string) (driver.Store, *driver.Error) {
+	store, ok := this.stores[name]
+	if !ok {
+		return nil, driver.NewError(http.StatusNotFound, "Store not found")
+	}
+	return store, nil
+}
+
+func (this *Store) GetTable(name string, create bool) (driver.Table, *driver.Error) {
 	if create {
 		this.mutex.Lock()
 		defer this.mutex.Unlock()

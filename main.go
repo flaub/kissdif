@@ -47,6 +47,8 @@ func NewServer() *Server {
 		envs: make(map[string]*Environment),
 	}
 
+	// router.HandleFunc("/{env}", this.PutEnv).
+	// 	Methods("PUT")
 	router.HandleFunc("/{env}/{table}/{index}/{key:.+}", this.Get).
 		Methods("GET")
 	router.HandleFunc("/{env}/{table}/_id/{id:.+}", this.Put).
@@ -107,6 +109,15 @@ func (this *Server) getEnvironment(name string, create bool) (*Environment, *dri
 	}
 	return env, nil
 }
+
+// func (this *Server) PutEnv(resp http.ResponseWriter, req *http.Request) {
+// 	vars := mux.Vars(req)
+// 	env, err := this.getEnvironment(vars["env"], false)
+// 	if err != nil {
+// 		this.sendError(resp, err)
+// 		return
+// 	}
+// }
 
 func (this *Server) Put(resp http.ResponseWriter, req *http.Request) {
 	contentType := req.Header.Get("Content-Type")
