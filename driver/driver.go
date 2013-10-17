@@ -31,11 +31,10 @@ func Open(name string) (Driver, *Error) {
 type Dictionary map[string]string
 
 type Driver interface {
-	Configure(name string, config Dictionary) (Store, *Error)
-	Open(name string) (Store, *Error)
+	Configure(name string, config Dictionary) (Environment, *Error)
 }
 
-type Store interface {
+type Environment interface {
 	GetTable(name string, create bool) (Table, *Error)
 }
 

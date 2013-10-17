@@ -3,10 +3,20 @@ package main
 import (
 	"github.com/flaub/kissdif/driver"
 	"io/ioutil"
+	. "launchpad.net/gocheck"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 )
+
+// Hook up gocheck into the "go test" runner.
+func Test(t *testing.T) { TestingT(t) }
+
+type MainSuite struct{}
+
+func init() {
+	Suite(&MainSuite{})
+}
 
 func NewRecord(id, doc string) *driver.Record {
 	return &driver.Record{
@@ -16,29 +26,22 @@ func NewRecord(id, doc string) *driver.Record {
 	}
 }
 
-func TestServer(t *testing.T) {
+func (this *MainSuite) TestServer(c *C) {
 	ts := httptest.NewServer(NewServer().Server.Handler)
 	defer ts.Close()
 
 	res, err := http.Get(ts.URL + "/mem/table/_id/1")
-	if err != nil {
-		t.Fatalf("Get failed: %v", err)
-	}
+	c.Assert(err, IsNil)
 	defer res.Body.Close()
 
 	result, err := ioutil.ReadAll(res.Body)
-	if err != nil {
-		t.Fatalf("Body read failed: %v", err)
-	}
+	c.Assert(err, IsNil)
+	c.Assert(res.StatusCode, Equals, http.StatusNotFound)
 
-	if res.StatusCode != http.StatusNotFound {
-		t.Fatalf("Status code is not 404: %v", res.Status)
-	}
-
-	t.Logf("Result: %s", result)
+	c.Logf("Result: %s", result)
 }
 
-func TestBasic(t *testing.T) {
+func (this *MainSuite) TestBasic(c *C) {
 	ts := httptest.NewServer(NewServer().Server.Handler)
 	defer ts.Close()
 
@@ -47,38 +50,22 @@ func TestBasic(t *testing.T) {
 	client := NewKissClient(ts.URL, "mem", "table")
 
 	err := client.Put(record)
-	if err != nil {
-		t.Fatalf("PUT failed: %v", err)
-	}
+	c.Assert(err, IsNil)
 
 	result, err := client.Get(record.Id)
-	if err != nil {
-		t.Fatalf("GET failed: %v", err)
-	}
-
-	if result.Count != 1 {
-		t.Fatalf("Unexpected result count: %d", result.Count)
-	}
-
-	if string(result.Records[0].Doc) != string(record.Doc) {
-		t.Fatalf("Unexpected result: %q", result)
-	}
+	c.Assert(err, IsNil)
+	c.Assert(result.Count, Equals, 1)
+	c.Assert(result.Records, HasLen, 1)
+	c.Assert(result.Records[0].Doc, Equals, record.Doc)
 
 	err = client.Delete(record.Id)
-	if err != nil {
-		t.Fatalf("DELETE failed: %v", err)
-	}
+	c.Assert(err, IsNil)
 
 	result, err = client.Get(record.Id)
-	if err == nil {
-		t.Fatalf("GET after DELETE should fail")
-	}
-	if err.Error() != "No records found" {
-		t.Fatalf("GET after DELETE unexpected err: %q", err)
-	}
+	c.Assert(err, ErrorMatches, "No records found")
 }
 
-func TestIndex(t *testing.T) {
+func (this *MainSuite) TestIndex(c *C) {
 	ts := httptest.NewServer(NewServer().Server.Handler)
 	defer ts.Close()
 
@@ -88,43 +75,28 @@ func TestIndex(t *testing.T) {
 	client := NewKissClient(ts.URL, "mem", "table")
 
 	err := client.Put(record)
-	if err != nil {
-		t.Fatalf("PUT failed: %v", err)
-	}
+	c.Assert(err, IsNil)
 
 	result, err := client.Get(record.Id)
-	if err != nil {
-		t.Fatalf("GET failed: %v", err)
-	}
-
-	if string(result.Records[0].Doc) != string(record.Doc) {
-		t.Fatalf("Unexpected result: %q", result)
-	}
+	c.Assert(err, IsNil)
+	c.Assert(result.Count, Equals, 1)
+	c.Assert(result.Records, HasLen, 1)
+	c.Assert(result.Records[0].Doc, Equals, record.Doc)
 
 	result, err = client.GetWithIndex("by_name", "Joe")
-	if err != nil {
-		t.Fatalf("GET failed: %v", err)
-	}
-
-	if string(result.Records[0].Doc) != string(record.Doc) {
-		t.Fatalf("Unexpected result: %q", result)
-	}
+	c.Assert(err, IsNil)
+	c.Assert(result.Count, Equals, 1)
+	c.Assert(result.Records, HasLen, 1)
+	c.Assert(result.Records[0].Doc, Equals, record.Doc)
 
 	err = client.Delete(record.Id)
-	if err != nil {
-		t.Fatalf("DELETE failed: %v", err)
-	}
+	c.Assert(err, IsNil)
 
 	result, err = client.Get(record.Id)
-	if err == nil {
-		t.Fatalf("GET after DELETE should fail")
-	}
-	if err.Error() != "Record not found" {
-		t.Fatalf("GET after DELETE unexpected err: %v", err)
-	}
+	c.Assert(err, ErrorMatches, "Record not found")
 }
 
-func TestQuery(t *testing.T) {
+func (this *MainSuite) TestQuery(c *C) {
 	// ts := httptest.NewServer(NewServer().Server.Handler)
 	// defer ts.Close()
 

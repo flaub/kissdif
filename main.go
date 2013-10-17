@@ -25,14 +25,14 @@ type ResultSet struct {
 	Records     []*driver.Record
 }
 
-type Environment struct {
-	name   string
-	driver driver.Driver
+type EnvJson struct {
+	Name   string
+	Config map[string]string
 }
 
 type Server struct {
 	http.Server
-	envs  map[string]*Environment
+	envs  map[string]driver.Environment
 	mutex sync.RWMutex
 }
 
@@ -44,7 +44,7 @@ func NewServer() *Server {
 			Addr:    ":8080",
 			Handler: router,
 		},
-		envs: make(map[string]*Environment),
+		envs: make(map[string]driver.Environment),
 	}
 
 	// router.HandleFunc("/{env}", this.PutEnv).
@@ -57,17 +57,6 @@ func NewServer() *Server {
 		Methods("DELETE")
 
 	return this
-}
-
-func NewEnvironment(name string) *Environment {
-	driver, err := driver.Open(name)
-	if err != nil {
-		panic(err)
-	}
-	return &Environment{
-		name:   name,
-		driver: driver,
-	}
 }
 
 func (this *Server) decodeBody(req *http.Request) (*driver.Record, *driver.Error) {
@@ -90,22 +79,12 @@ func (this *Server) sendJson(resp http.ResponseWriter, data interface{}) {
 	json.NewEncoder(resp).Encode(data)
 }
 
-func (this *Server) getEnvironment(name string, create bool) (*Environment, *driver.Error) {
-	if create {
-		this.mutex.Lock()
-		defer this.mutex.Unlock()
-	} else {
-		this.mutex.RLock()
-		defer this.mutex.RUnlock()
-	}
+func (this *Server) getEnvironment(name string) (driver.Environment, *driver.Error) {
+	this.mutex.RLock()
+	defer this.mutex.RUnlock()
 	env, ok := this.envs[name]
 	if !ok {
-		if !create {
-			return nil, driver.NewError(http.StatusNotFound, "Environment not found")
-		}
-		fmt.Printf("Creating new environment: %v\n", name)
-		env = NewEnvironment(name)
-		this.envs[name] = env
+		return nil, driver.NewError(http.StatusNotFound, "Environment not found")
 	}
 	return env, nil
 }
@@ -127,12 +106,12 @@ func (this *Server) Put(resp http.ResponseWriter, req *http.Request) {
 		return
 	}
 	vars := mux.Vars(req)
-	env, err := this.getEnvironment(vars["env"], true)
+	env, err := this.getEnvironment(vars["env"])
 	if err != nil {
 		this.sendError(resp, err)
 		return
 	}
-	table, err := env.getTable(vars["table"], true)
+	table, err := env.GetTable(vars["table"], true)
 	if err != nil {
 		this.sendError(resp, err)
 		return
@@ -234,12 +213,12 @@ func getBounds(args url.Values) (lower, upper *driver.Bound, err *driver.Error) 
 func (this *Server) Get(resp http.ResponseWriter, req *http.Request) {
 	args := req.URL.Query()
 	vars := mux.Vars(req)
-	env, err := this.getEnvironment(vars["env"], false)
+	env, err := this.getEnvironment(vars["env"])
 	if err != nil {
 		this.sendError(resp, err)
 		return
 	}
-	table, err := env.getTable(vars["table"], false)
+	table, err := env.GetTable(vars["table"], false)
 	if err != nil {
 		this.sendError(resp, err)
 		return
@@ -283,19 +262,15 @@ func (this *Server) Get(resp http.ResponseWriter, req *http.Request) {
 
 func (this *Server) Delete(resp http.ResponseWriter, req *http.Request) {
 	vars := mux.Vars(req)
-	env, err := this.getEnvironment(vars["env"], true)
+	env, err := this.getEnvironment(vars["env"])
 	if err != nil {
 		this.sendError(resp, err)
 		return
 	}
-	table, err := env.getTable(vars["table"], true)
+	table, err := env.GetTable(vars["table"], true)
 	if err != nil {
 		this.sendError(resp, err)
 		return
 	}
 	table.Delete(vars["id"])
-}
-
-func (this *Environment) getTable(name string, create bool) (driver.Table, *driver.Error) {
-	return this.driver.GetTable(name, create)
 }

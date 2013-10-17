@@ -1,28 +1,42 @@
-package mem
+package main
 
 import (
 	"github.com/flaub/kissdif/driver"
+	_ "github.com/flaub/kissdif/driver/mem"
+	_ "github.com/flaub/kissdif/driver/sql"
+	. "launchpad.net/gocheck"
 	"net/http"
-	"testing"
 )
 
-func eq(a, b []string) bool {
-	if len(a) != len(b) {
-		return false
-	}
-	for i, v := range a {
-		if v != b[i] {
-			return false
-		}
-	}
-	return true
+type TestSuite struct {
+	name string
+	env  driver.Environment
 }
 
-func expect(t *testing.T, table driver.Table, query *driver.Query, expectedEof bool, expected ...string) {
-	ch, err := table.Get(query)
-	if err != nil {
-		t.Fatalf("Get failed: %v", err)
+type MemoryDriver struct {
+	TestSuite
+}
+
+type SqlDriver struct {
+	TestSuite
+}
+
+func init() {
+	Suite(&MemoryDriver{TestSuite: TestSuite{name: "mem"}})
+	Suite(&SqlDriver{TestSuite: TestSuite{name: "sql"}})
+}
+
+func put(c *C, table driver.Table, values ...string) {
+	for _, value := range values {
+		record := &driver.Record{Id: value, Doc: []byte(value)}
+		err := table.Put(record)
+		c.Assert(err, IsNil)
 	}
+}
+
+func expect(c *C, table driver.Table, query *driver.Query, expectedEof bool, expected ...string) {
+	ch, err := table.Get(query)
+	c.Assert(err, IsNil)
 	actual := []string{}
 	eof := false
 	for record := range ch {
@@ -32,70 +46,53 @@ func expect(t *testing.T, table driver.Table, query *driver.Query, expectedEof b
 			actual = append(actual, string(record.Doc))
 		}
 	}
-	if !eq(actual, expected) {
-		t.Fatalf("Mismatch. query: (%v, %v) expected: %v actual: %v",
-			query.Lower, query.Upper, expected, actual)
-	}
-	if eof != expectedEof {
-		t.Fatalf("EOF Mismatch. query: (%v, %v) expected: %v, actual: %v",
-			query.Lower, query.Upper, expectedEof, eof)
-	}
+	c.Assert(actual, DeepEquals, expected)
+	c.Assert(eof, Equals, expectedEof)
 }
 
-func put(t *testing.T, table driver.Table, values ...string) {
-	for _, value := range values {
-		record := &driver.Record{Id: value, Doc: []byte(value)}
-		err := table.Put(record)
-		if err != nil {
-			t.Fatalf("Put failed: %v", err)
-		}
-	}
+func (this *TestSuite) SetUpTest(c *C) {
+	db, err := driver.Open(this.name)
+	config := map[string]string{}
+	this.env, err = db.Configure("env", config)
+	c.Assert(err, IsNil)
+	c.Assert(this.env, NotNil)
 }
 
-func TestBasic(t *testing.T) {
-	mem := NewDriver()
-	table, err := mem.GetTable("table", true)
-	if err != nil {
-		t.Fatalf("GetTable failed: %v", err)
-	}
+func (this *TestSuite) TestBasic(c *C) {
+	table, err := this.env.GetTable("table", true)
+	c.Assert(err, IsNil)
+	c.Assert(table, NotNil)
 
 	query := &driver.Query{}
 	_, err = table.Get(query)
-	if err == nil || err.Status != http.StatusBadRequest {
-		t.Fatalf("Get should fail without index specified: %v", err)
-	}
+	c.Assert(err, ErrorMatches, "Invalid index")
+	c.Assert(err.Status, Equals, http.StatusBadRequest)
 
 	query.Index = "_id"
 	_, err = table.Get(query)
-	if err == nil || err.Status != http.StatusBadRequest || err.Message != "Invalid limit" {
-		t.Fatalf("Get should fail with invalid limit: %v", err)
-	}
+	c.Assert(err, ErrorMatches, "Invalid limit")
+	c.Assert(err.Status, Equals, http.StatusBadRequest)
 
 	query.Limit = 10
 	query.Index = "_does_not_exist_"
 	_, err = table.Get(query)
-	if err == nil || err.Status != http.StatusNotFound || err.Message != "Index not found" {
-		t.Fatalf("Get should fail with index not found: %v", err)
-	}
+	c.Assert(err, ErrorMatches, "Index not found")
+	c.Assert(err.Status, Equals, http.StatusNotFound)
 
 	query.Index = "_id"
 	_, err = table.Get(query)
-	if err == nil || err.Status != http.StatusNotFound {
-		t.Fatalf("Get should fail with records not found: %v", err)
-	}
+	c.Assert(err, ErrorMatches, "No records found")
+	c.Assert(err.Status, Equals, http.StatusNotFound)
 
-	put(t, table, "a")
-	expect(t, table, query, true, "a")
+	put(c, table, "a")
+	expect(c, table, query, true, "a")
 }
 
-func TestLowerBound(t *testing.T) {
-	mem := NewDriver()
-	table, err := mem.GetTable("table", true)
-	if err != nil {
-		t.Fatalf("GetTable failed: %v", err)
-	}
+func (this *TestSuite) TestLowerBound(c *C) {
+	table, err := this.env.GetTable("table", true)
+	c.Assert(err, IsNil)
 
-	put(t, table, "b", "c", "d")
+	put(c, table, "b", "c", "d")
 
 	query := &driver.Query{
 		Index: "_id",
@@ -121,18 +118,15 @@ func TestLowerBound(t *testing.T) {
 
 	for _, test := range tt {
 		query.Lower = &driver.Bound{test.inc, test.key}
-		expect(t, table, query, true, test.expected...)
+		expect(c, table, query, true, test.expected...)
 	}
 }
 
-func TestUpperBound(t *testing.T) {
-	mem := NewDriver()
-	table, err := mem.GetTable("table", true)
-	if err != nil {
-		t.Fatalf("GetTable failed: %v", err)
-	}
+func (this *TestSuite) TestUpperBound(c *C) {
+	table, err := this.env.GetTable("table", true)
+	c.Assert(err, IsNil)
 
-	put(t, table, "b", "c", "d")
+	put(c, table, "b", "c", "d")
 
 	query := &driver.Query{
 		Index: "_id",
@@ -158,18 +152,15 @@ func TestUpperBound(t *testing.T) {
 
 	for _, test := range tt {
 		query.Upper = &driver.Bound{test.inc, test.key}
-		expect(t, table, query, true, test.expected...)
+		expect(c, table, query, true, test.expected...)
 	}
 }
 
-func TestRange(t *testing.T) {
-	mem := NewDriver()
-	table, err := mem.GetTable("table", true)
-	if err != nil {
-		t.Fatalf("GetTable failed: %v", err)
-	}
+func (this *TestSuite) TestRange(c *C) {
+	table, err := this.env.GetTable("table", true)
+	c.Assert(err, IsNil)
 
-	put(t, table, "b", "c", "d")
+	put(c, table, "b", "c", "d")
 
 	query := &driver.Query{
 		Index: "_id",
@@ -199,6 +190,6 @@ func TestRange(t *testing.T) {
 	for _, test := range tt {
 		query.Lower = &driver.Bound{test.linc, test.lkey}
 		query.Upper = &driver.Bound{test.uinc, test.ukey}
-		expect(t, table, query, true, test.expected...)
+		expect(c, table, query, true, test.expected...)
 	}
 }
