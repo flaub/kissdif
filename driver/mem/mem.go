@@ -3,7 +3,7 @@ package mem
 import (
 	"code.google.com/p/go.text/collate"
 	"code.google.com/p/go.text/language"
-	"fmt"
+	_ "fmt"
 	"github.com/cznic/b"
 	"github.com/flaub/kissdif/driver"
 	"io"
@@ -80,7 +80,7 @@ func (this *Environment) GetTable(name string, create bool) (driver.Table, *driv
 		if !create {
 			return nil, driver.NewError(http.StatusNotFound, "Table not found")
 		}
-		fmt.Printf("Creating new table: %v\n", name)
+		// fmt.Printf("Creating new table: %v\n", name)
 		table = NewTable(name)
 		this.tables[name] = table
 	}
