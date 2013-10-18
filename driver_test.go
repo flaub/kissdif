@@ -1,7 +1,6 @@
 package main
 
 import (
-	_ "code.google.com/p/go-sqlite/go1/sqlite3"
 	"github.com/flaub/kissdif/driver"
 	"io/ioutil"
 	. "launchpad.net/gocheck"
@@ -68,7 +67,6 @@ func getTemp(c *C) string {
 
 func (this *TestDriverSql) SetUpTest(c *C) {
 	this.config = make(driver.Dictionary)
-	this.config["driver"] = "sqlite3"
 	this.config["dsn"] = getTemp(c) + ".db"
 	this.TestSuite.SetUpTest(c)
 }

@@ -1,6 +1,7 @@
 package sql
 
 import (
+	_ "code.google.com/p/go-sqlite/go1/sqlite3"
 	"database/sql"
 	"fmt"
 	"github.com/flaub/kissdif/driver"
@@ -169,7 +170,7 @@ func (this *Environment) NewTable(name string) (*Table, *driver.Error) {
 }
 
 func (this *Environment) newSession(table string) (*session, *driver.Error) {
-	db, err := sql.Open(this.config["driver"], this.config["dsn"])
+	db, err := sql.Open("sqlite3", this.config["dsn"])
 	if err != nil {
 		return nil, driver.NewError(http.StatusInternalServerError, err.Error())
 	}
