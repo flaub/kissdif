@@ -1,37 +1,43 @@
 package sql
 
 import (
+	"bytes"
 	_ "code.google.com/p/go-sqlite/go1/sqlite3"
+	"crypto/sha1"
 	"database/sql"
 	"fmt"
 	"github.com/flaub/kissdif/driver"
+	"io"
 	"net/http"
 	"strings"
 	"sync"
+	"text/template"
 )
 
 const (
-	sqlRecordSchema = `
-CREATE TABLE IF NOT EXISTS R_%v (
+	sqlSchema = `
+CREATE TABLE IF NOT EXISTS T_Main_{{.T}} (
 	_id INT NOT NULL,
 	_rev INT NOT NULL,
 	doc TEXT NOT NULL,
 	PRIMARY KEY(_id)
-)
-`
-	sqlIndexSchema = `
-CREATE TABLE IF NOT EXISTS I_%v (
+);
+
+CREATE TABLE IF NOT EXISTS T_Alt_{{.T}} (
 	name TEXT NOT NULL,
 	value TEXT NOT NULL,
 	_id INT NOT NULL,
 	PRIMARY KEY(name, value, _id)
-)
+);
+
+CREATE INDEX IF NOT EXISTS I_Alt_{{.T}}_value ON T_Alt_{{.T}} (value);
+CREATE INDEX IF NOT EXISTS I_Alt_{{.T}}_id ON T_Alt_{{.T}} (_id);
 `
 	sqlRecordQuery = `
 SELECT
 	_id, _rev, doc
 FROM
-	R_%v%v
+	T_Main_{{.T}}{{.W}}
 ORDER BY
 	_id
 LIMIT ?
@@ -40,19 +46,24 @@ LIMIT ?
 SELECT
 	r._id, r._rev, r.doc
 FROM
-	R_%v r
+	T_Main_{{.T}} r
 JOIN
-	I_%v i
-	USING(_id)%v
+	T_Alt_{{.T}} i
+	USING(_id){{.W}}
 ORDER BY
 	i.value
 LIMIT ?
 `
-	sqlRecordReplace = "REPLACE INTO R_%v (_id, _rev, doc) VALUES (?, ?, ?)"
-	sqlIndexAttach   = "INSERT INTO I_%v (_id, name, value) VALUES (?, ?, ?)"
-	sqlIndexDetach   = "DELETE FROM I_%v WHERE name = ? AND value = ?"
-	sqlRecordDelete  = "DELETE FROM R_%v WHERE _id = ?"
-	sqlIndexDelete   = "DELETE FROM I_%v WHERE _id = ?" // FIXME: this results in a table scan
+	sqlRecordInsert = "INSERT INTO T_Main_{{.T}} (_id, _rev, doc) VALUES (?, ?, ?)"
+	sqlRecordUpdate = `
+UPDATE T_Main_{{.T}} 
+SET _rev = ?, doc = ?
+WHERE _id = ? AND _rev = ?
+`
+	sqlIndexAttach  = "INSERT INTO T_Alt_{{.T}} (_id, name, value) VALUES (?, ?, ?)"
+	sqlIndexDetach  = "DELETE FROM T_Alt_{{.T}} WHERE name = ? AND value = ?"
+	sqlRecordDelete = "DELETE FROM T_Main_{{.T}} WHERE _id = ?"
+	sqlIndexDelete  = "DELETE FROM T_Alt_{{.T}} WHERE _id = ?"
 )
 
 type Driver struct {
@@ -71,18 +82,6 @@ type Environment struct {
 type Table struct {
 	name string
 	env  *Environment
-}
-
-type readyStmt struct {
-	db   *sql.DB
-	stmt *sql.Stmt
-	args []interface{}
-}
-
-type session struct {
-	db    *sql.DB
-	table string
-	queue []*readyStmt
 }
 
 func init() {
@@ -120,14 +119,6 @@ func (this *Driver) Open(name string) (driver.Environment, *driver.Error) {
 	return env, nil
 }
 
-func (this *readyStmt) close() error {
-	err := this.stmt.Close()
-	if err != nil {
-		return err
-	}
-	return this.db.Close()
-}
-
 func (this *Environment) GetTable(name string, create bool) (driver.Table, *driver.Error) {
 	if create {
 		this.mutex.Lock()
@@ -153,83 +144,26 @@ func (this *Environment) GetTable(name string, create bool) (driver.Table, *driv
 }
 
 func (this *Environment) NewTable(name string) (*Table, *driver.Error) {
-	session, err := this.newSession(name)
-	if err != nil {
-		return nil, err
-	}
-	defer session.close()
-	err = session.add(sqlRecordSchema)
-	if err != nil {
-		return nil, err
-	}
-	err = session.add(sqlIndexSchema)
-	if err != nil {
-		return nil, err
-	}
-	err = session.exec()
-	if err != nil {
-		return nil, err
-	}
-	return &Table{name, this}, nil
-}
-
-func (this *Environment) newSession(table string) (*session, *driver.Error) {
 	db, err := sql.Open("sqlite3", this.config["dsn"])
 	if err != nil {
 		return nil, driver.NewError(http.StatusInternalServerError, err.Error())
 	}
-	return &session{db: db, table: table}, nil
-}
-
-func (this *session) close() {
-	for _, stmt := range this.queue {
-		stmt.close()
-	}
-	this.queue = []*readyStmt{}
-	this.db.Close()
-}
-
-func (this *session) add(format string, args ...interface{}) *driver.Error {
-	sql := fmt.Sprintf(format, this.table)
-	// fmt.Printf("Preparing sql: %v\n", sql)
-	stmt, err := this.db.Prepare(sql)
-	if err != nil {
-		return driver.NewError(http.StatusInternalServerError, err.Error())
-	}
-	ready := &readyStmt{this.db, stmt, args}
-	this.queue = append(this.queue, ready)
-	return nil
-}
-
-func (this *session) exec() *driver.Error {
-	tx, err := this.db.Begin()
-	if err != nil {
-		return driver.NewError(http.StatusInternalServerError, err.Error())
-	}
-	for _, stmt := range this.queue {
-		defer stmt.close()
-		if err == nil {
-			// fmt.Printf("Executing sql: %v\n", stmt.stmt)
-			tx.Stmt(stmt.stmt).Exec(stmt.args...)
-		}
-	}
-	if err != nil {
-		tx.Rollback()
-		return driver.NewError(http.StatusInternalServerError, err.Error())
-	}
-	tx.Commit()
-	this.queue = []*readyStmt{}
-	return nil
-}
-
-func (this *session) prepare(format string, args ...interface{}) (*readyStmt, *driver.Error) {
-	sql := fmt.Sprintf(format, args...)
-	// fmt.Printf("Preparing sql: %s\n", sql)
-	stmt, err := this.db.Prepare(sql)
+	defer db.Close()
+	_, err = db.Exec(compile(sqlSchema, name, ""))
 	if err != nil {
 		return nil, driver.NewError(http.StatusInternalServerError, err.Error())
 	}
-	return &readyStmt{this.db, stmt, nil}, nil
+	return &Table{name, this}, nil
+}
+
+func compile(text, table, where string) string {
+	var buf bytes.Buffer
+	tmpl := template.Must(template.New("").Parse(text))
+	err := tmpl.Execute(&buf, struct{ T, W string }{table, where})
+	if err != nil {
+		panic(err)
+	}
+	return buf.String()
 }
 
 func (this *Table) where(query *driver.Query) (string, []interface{}) {
@@ -272,30 +206,16 @@ func (this *Table) where(query *driver.Query) (string, []interface{}) {
 	return "\nWHERE " + strings.Join(exprs, " AND "), args
 }
 
-func (this *Table) prepareQuery(query *driver.Query) (*readyStmt, *driver.Error) {
-	session, err := this.env.newSession(this.name)
-	if err != nil {
-		return nil, err
-	}
-
+func (this *Table) prepareQuery(query *driver.Query) (string, []interface{}) {
 	where, args := this.where(query)
 	args = append(args, query.Limit+1)
-
-	var format string
-	var fmtArgs []interface{}
+	var text string
 	if query.Index == "_id" {
-		format = sqlRecordQuery
-		fmtArgs = []interface{}{this.name, where}
+		text = sqlRecordQuery
 	} else {
-		format = sqlIndexQuery
-		fmtArgs = []interface{}{this.name, this.name, where}
+		text = sqlIndexQuery
 	}
-	stmt, err := session.prepare(format, fmtArgs...)
-	if err != nil {
-		return nil, err
-	}
-	stmt.args = args
-	return stmt, nil
+	return compile(text, this.name, where), args
 }
 
 func (this *Table) Get(query *driver.Query) (chan (*driver.Record), *driver.Error) {
@@ -305,17 +225,19 @@ func (this *Table) Get(query *driver.Query) (chan (*driver.Record), *driver.Erro
 	if query.Limit == 0 {
 		return nil, driver.NewError(http.StatusBadRequest, "Invalid limit")
 	}
-	ready, err := this.prepareQuery(query)
+	db, err := sql.Open("sqlite3", this.env.config["dsn"])
 	if err != nil {
-		return nil, err
+		return nil, driver.NewError(http.StatusInternalServerError, err.Error())
 	}
-	rows, err2 := ready.stmt.Query(ready.args...)
-	if err2 != nil {
-		return nil, driver.NewError(http.StatusInternalServerError, err2.Error())
+	stmt, args := this.prepareQuery(query)
+	rows, err := db.Query(stmt, args...)
+	if err != nil {
+		db.Close()
+		return nil, driver.NewError(http.StatusInternalServerError, err.Error())
 	}
 	ch := make(chan (*driver.Record))
 	go func() {
-		defer ready.close()
+		defer db.Close()
 		defer rows.Close()
 		defer close(ch)
 		count := 0
@@ -337,45 +259,72 @@ func (this *Table) Get(query *driver.Query) (chan (*driver.Record), *driver.Erro
 	return ch, nil
 }
 
-func (this *Table) Put(record *driver.Record) *driver.Error {
-	session, err := this.env.newSession(this.name)
+func (this *Table) Put(record *driver.Record) (string, *driver.Error) {
+	db, err := sql.Open("sqlite3", this.env.config["dsn"])
 	if err != nil {
-		return err
+		return "", driver.NewError(http.StatusInternalServerError, err.Error())
 	}
-	defer session.close()
-	// FIXME: this results in a table scan
-	err = session.add(sqlIndexDelete, record.Id)
+	defer db.Close()
+	h := sha1.New()
+	io.WriteString(h, record.Doc)
+	rev := fmt.Sprintf("%x", h.Sum(nil))
+	tx, err := db.Begin()
 	if err != nil {
-		return err
+		return "", driver.NewError(http.StatusInternalServerError, err.Error())
 	}
-	err = session.add(sqlRecordReplace, record.Id, record.Rev, record.Doc)
+	_, err = tx.Exec(compile(sqlIndexDelete, this.name, ""), record.Id)
 	if err != nil {
-		return err
+		tx.Rollback()
+		return "", driver.NewError(http.StatusInternalServerError, err.Error())
+	}
+	if record.Rev == "" {
+		_, err = tx.Exec(compile(sqlRecordInsert, this.name, ""), record.Id, rev, record.Doc)
+		if err != nil {
+			tx.Rollback()
+			return "", driver.NewError(http.StatusConflict, err.Error())
+		}
+	} else {
+		result, err := tx.Exec(compile(sqlRecordUpdate, this.name, ""),
+			rev, record.Doc, record.Id, record.Rev)
+		rows, err := result.RowsAffected()
+		if err != nil || rows != 1 {
+			tx.Rollback()
+			return "", driver.NewError(http.StatusConflict, "Document update conflict")
+		}
 	}
 	for name, keys := range record.Keys {
 		for _, key := range keys {
-			err = session.add(sqlIndexAttach, record.Id, name, key)
+			_, err = tx.Exec(compile(sqlIndexAttach, this.name, ""), record.Id, name, key)
 			if err != nil {
-				return err
+				tx.Rollback()
+				return "", driver.NewError(http.StatusInternalServerError, err.Error())
 			}
 		}
 	}
-	return session.exec()
+	tx.Commit()
+	return rev, nil
 }
 
 func (this *Table) Delete(id string) *driver.Error {
-	session, err := this.env.newSession(this.name)
+	db, err := sql.Open("sqlite3", this.env.config["dsn"])
 	if err != nil {
-		return err
+		return driver.NewError(http.StatusInternalServerError, err.Error())
 	}
-	defer session.close()
-	err = session.add(sqlIndexDelete, id)
+	defer db.Close()
+	tx, err := db.Begin()
 	if err != nil {
-		return err
+		return driver.NewError(http.StatusInternalServerError, err.Error())
 	}
-	err = session.add(sqlRecordDelete, id)
+	_, err = tx.Exec(compile(sqlIndexDelete, this.name, ""), id)
 	if err != nil {
-		return err
+		tx.Rollback()
+		return driver.NewError(http.StatusInternalServerError, err.Error())
 	}
-	return session.exec()
+	_, err = tx.Exec(compile(sqlRecordDelete, this.name, ""), id)
+	if err != nil {
+		tx.Rollback()
+		return driver.NewError(http.StatusInternalServerError, err.Error())
+	}
+	tx.Commit()
+	return nil
 }

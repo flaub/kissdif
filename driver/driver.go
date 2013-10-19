@@ -23,7 +23,8 @@ func Register(name string, driver Driver) {
 func Open(name string) (Driver, *Error) {
 	driver, ok := drivers[name]
 	if !ok {
-		return nil, NewError(http.StatusNotFound, fmt.Sprintf("kissdif: unknown driver %q (forgotten import?)", name))
+		return nil, NewError(http.StatusNotFound,
+			fmt.Sprintf("kissdif: unknown driver %q (forgotten import?)", name))
 	}
 	return driver, nil
 }
@@ -74,7 +75,7 @@ func (this *Query) String() string {
 
 type Table interface {
 	Get(query *Query) (chan (*Record), *Error)
-	Put(record *Record) *Error
+	Put(record *Record) (rev string, err *Error)
 	Delete(id string) *Error
 }
 

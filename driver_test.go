@@ -38,20 +38,20 @@ func init() {
 
 func (this *TestSuite) putValues(values ...string) {
 	for _, value := range values {
-		record := &Record{Id: value, Doc: value}
-		err := this.table.Put(record)
-		this.c.Assert(err, IsNil)
+		this.putRecordFull(value, "", value, IndexMap{})
 	}
 }
 
-func (this *TestSuite) putRecord(value string, keys IndexMap) {
-	this.putRecordKey(value, value, keys)
+func (this *TestSuite) putRecord(value string, keys IndexMap) string {
+	return this.putRecordFull(value, "", value, keys)
 }
 
-func (this *TestSuite) putRecordKey(key, value string, keys IndexMap) {
-	record := &Record{Id: key, Doc: value, Keys: keys}
-	err := this.table.Put(record)
-	this.c.Assert(err, IsNil)
+func (this *TestSuite) putRecordFull(id, rev, value string, keys IndexMap) string {
+	record := &Record{Id: id, Rev: rev, Doc: value, Keys: keys}
+	rev, err := this.table.Put(record)
+	this.c.Assert(err, IsNil, Commentf("Record: %v", record))
+	this.c.Assert(rev, Not(Equals), "", Commentf("Record: %v", record))
+	return rev
 }
 
 // mb = make bound
@@ -66,7 +66,6 @@ func (this *TestSuite) expect(test expectedQuery, expectedEof bool, limit int) {
 		Lower: test.lower,
 		Upper: test.upper,
 	}
-	this.c.Logf("Query: %v", query)
 	ch, err := this.table.Get(query)
 	this.c.Assert(err, IsNil)
 	actual := []string{}
@@ -78,8 +77,8 @@ func (this *TestSuite) expect(test expectedQuery, expectedEof bool, limit int) {
 			actual = append(actual, record.Doc)
 		}
 	}
-	this.c.Check(actual, DeepEquals, test.expected)
-	this.c.Check(eof, Equals, expectedEof)
+	this.c.Check(actual, DeepEquals, test.expected, Commentf("Query: %v", query))
+	this.c.Check(eof, Equals, expectedEof, Commentf("Query: %v", query))
 }
 
 func (this *TestSuite) query(eof bool, limit int, set []expectedQuery) {
@@ -237,54 +236,54 @@ func (this *TestSuite) TestMultiIndex(c *C) {
 func (this *TestSuite) TestUpdates(c *C) {
 	this.c = c
 	// identical update
-	this.putRecord("a", IndexMap{
+	rev := this.putRecord("a", IndexMap{
 		"x": []string{"a_x"},
 		"y": []string{"a_y"},
 	})
-	this.putRecord("a", IndexMap{
+	this.putRecordFull("a", rev, "a", IndexMap{
 		"x": []string{"a_x"},
 		"y": []string{"a_y"},
 	})
 	// modify value
-	this.putRecordKey("b", "b", IndexMap{
+	rev = this.putRecord("b", IndexMap{
 		"x": []string{"b_x"},
 		"y": []string{"b_y"},
 	})
-	this.putRecordKey("b", "bb", IndexMap{
+	this.putRecordFull("b", rev, "bb", IndexMap{
 		"x": []string{"b_x"},
 		"y": []string{"b_y"},
 	})
 	// drop an alt key
-	this.putRecord("c", IndexMap{
+	rev = this.putRecord("c", IndexMap{
 		"x": []string{"c_x"},
 		"y": []string{"c_y"},
 	})
-	this.putRecord("c", IndexMap{
+	this.putRecordFull("c", rev, "c", IndexMap{
 		"x": []string{"c_x"},
 	})
 	// drop all alt keys
-	this.putRecord("d", IndexMap{
+	rev = this.putRecord("d", IndexMap{
 		"x": []string{"d_x"},
 		"y": []string{"d_y"},
 	})
-	this.putRecord("d", IndexMap{})
+	this.putRecordFull("d", rev, "d", IndexMap{})
 	// add extra alt key
-	this.putRecord("e", IndexMap{
+	rev = this.putRecord("e", IndexMap{
 		"x": []string{"e_x"},
 	})
-	this.putRecord("e", IndexMap{
+	this.putRecordFull("e", rev, "e", IndexMap{
 		"x": []string{"e_x"},
 		"y": []string{"e_y"},
 	})
 	// add another record to index
-	this.putRecord("f", IndexMap{
+	rev = this.putRecord("f", IndexMap{
 		"x": []string{"a_x"},
 	})
 	// remove extra record from index
-	this.putRecord("g", IndexMap{
+	rev = this.putRecord("g", IndexMap{
 		"x": []string{"a_x"},
 	})
-	this.putRecord("g", IndexMap{})
+	this.putRecordFull("g", rev, "g", IndexMap{})
 
 	this.query(true, 10, []expectedQuery{
 		{"_id", nil, nil, []string{"a", "bb", "c", "d", "e", "f", "g"}},
@@ -329,4 +328,36 @@ func (this *TestSuite) TestDelete(c *C) {
 		{"_id", nil, nil, []string{}},
 		{"x", nil, nil, []string{}},
 	})
+}
+
+func (this *TestSuite) TestMVCC(c *C) {
+	this.c = c
+
+	record := &Record{Id: "a", Doc: "a"}
+	prev, err := this.table.Put(record)
+	this.c.Assert(err, IsNil)
+	this.c.Assert(prev, Not(Equals), "")
+
+	record = &Record{Id: "a", Doc: "a"}
+	rev, err := this.table.Put(record)
+	this.c.Assert(err, NotNil)
+	this.c.Assert(err.Status, Equals, http.StatusConflict)
+	this.c.Assert(rev, Equals, "")
+
+	record = &Record{Id: "a", Rev: prev, Doc: "a"}
+	rev, err = this.table.Put(record)
+	this.c.Assert(err, IsNil)
+	this.c.Assert(rev, Equals, prev)
+
+	prev = rev
+	record = &Record{Id: "a", Rev: rev, Doc: "b"}
+	rev, err = this.table.Put(record)
+	this.c.Assert(err, IsNil)
+	this.c.Assert(rev, Not(Equals), prev)
+
+	record = &Record{Id: "a", Rev: "xxx", Doc: "b"}
+	rev, err = this.table.Put(record)
+	this.c.Assert(err, NotNil)
+	this.c.Assert(err.Status, Equals, http.StatusConflict)
+	this.c.Assert(rev, Equals, "")
 }

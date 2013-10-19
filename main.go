@@ -126,7 +126,7 @@ func (this *Server) Put(resp http.ResponseWriter, req *http.Request) {
 		this.sendError(resp, driver.NewError(http.StatusBadRequest, "ID Mismatch"))
 		return
 	}
-	err = table.Put(reqJson)
+	_, err = table.Put(reqJson)
 	if err != nil {
 		this.sendError(resp, err)
 		return

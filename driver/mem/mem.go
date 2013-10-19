@@ -3,7 +3,8 @@ package mem
 import (
 	"code.google.com/p/go.text/collate"
 	"code.google.com/p/go.text/language"
-	_ "fmt"
+	"crypto/sha1"
+	"fmt"
 	"github.com/cznic/b"
 	"github.com/flaub/kissdif/driver"
 	"io"
@@ -111,27 +112,30 @@ func newIndex(name string) *Index {
 	}
 }
 
-func (this *Table) Put(newRecord *driver.Record) *driver.Error {
+func (this *Table) Put(newRecord *driver.Record) (string, *driver.Error) {
 	this.mutex.Lock()
 	defer this.mutex.Unlock()
+	h := sha1.New()
+	io.WriteString(h, newRecord.Doc)
+	rev := fmt.Sprintf("%x", h.Sum(nil))
 	primary := this.getIndex("_id")
 	var record *driver.Record
 	value, ok := primary.tree.Get(newRecord.Id)
 	if ok {
 		record = value.(*driver.Record)
-		if newRecord.Rev != "" && newRecord.Rev != record.Rev {
-			return driver.NewError(http.StatusConflict, "Document update conflict")
+		if newRecord.Rev != record.Rev {
+			return "", driver.NewError(http.StatusConflict, "Document update conflict")
 		}
 		this.removeKeys(record)
-		record.Rev = newRecord.Rev
 		record.Doc = newRecord.Doc
 		record.Keys = newRecord.Keys
 	} else {
 		record = newRecord
 		primary.tree.Set(record.Id, record)
 	}
+	record.Rev = rev
 	this.addKeys(record)
-	return nil
+	return rev, nil
 }
 
 func (this *Table) Delete(id string) *driver.Error {
