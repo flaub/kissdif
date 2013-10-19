@@ -32,9 +32,7 @@ type Table struct {
 	mutex sync.RWMutex
 }
 
-type altNode struct {
-	records map[string]*driver.Record
-}
+type recordById map[string]*driver.Record
 
 var (
 	collator *collate.Collator
@@ -92,7 +90,7 @@ func NewTable(name string) *Table {
 		name: name,
 		keys: make(map[string]*Index),
 	}
-	this.keys["_id"] = NewIndex("_id")
+	this.keys["_id"] = newIndex("_id")
 	return this
 }
 
@@ -100,7 +98,7 @@ func cmp(a, b interface{}) int {
 	return collator.CompareString(a.(string), b.(string))
 }
 
-func NewIndex(name string) *Index {
+func newIndex(name string) *Index {
 	return &Index{
 		name: name,
 		tree: b.TreeNew(cmp),
@@ -186,10 +184,10 @@ func (this *Table) Get(query *driver.Query) (chan (*driver.Record), *driver.Erro
 	} else {
 		cur, _ = index.tree.SeekFirst()
 	}
-	if cur == nil {
-		this.mutex.RUnlock()
-		return nil, driver.NewError(http.StatusNotFound, "No records found")
-	}
+	// if cur == nil {
+	// 	this.mutex.RUnlock()
+	// 	return nil, driver.NewError(http.StatusNotFound, "No records found")
+	// }
 	end := findEnd(index.tree, query.Upper)
 	ch := make(chan (*driver.Record))
 	go func() {
@@ -198,8 +196,8 @@ func (this *Table) Get(query *driver.Query) (chan (*driver.Record), *driver.Erro
 			if query.Index == "_id" {
 				ch <- value.(*driver.Record)
 			} else {
-				node := value.(*altNode)
-				for _, v := range node.records {
+				node := value.(recordById)
+				for _, v := range node {
 					ch <- v
 				}
 			}
@@ -244,30 +242,28 @@ func (this *Table) getIndex(name string) *Index {
 	return index
 }
 
-func newAltNode() *altNode {
-	return &altNode{make(map[string]*driver.Record)}
-}
-
 func addRecord(tree *b.Tree, key string, record *driver.Record) {
-	var node *altNode
+	// fmt.Printf("addRecord: (%v, %v)\n", tree, key)
+	var node recordById
 	raw, ok := tree.Get(key)
 	if ok {
-		node = raw.(*altNode)
+		node = raw.(recordById)
 	} else {
-		node = newAltNode()
+		node = make(recordById)
+		tree.Set(key, node)
 	}
-	node.records[record.Id] = record
+	node[record.Id] = record
 }
 
 func removeRecord(tree *b.Tree, key string, record *driver.Record) {
-	var node *altNode
+	var node recordById
 	raw, ok := tree.Get(key)
 	if !ok {
 		return
 	}
-	node = raw.(*altNode)
-	delete(node.records, record.Id)
-	if len(node.records) == 0 {
+	node = raw.(recordById)
+	delete(node, record.Id)
+	if len(node) == 0 {
 		tree.Delete(key)
 	}
 }
@@ -283,9 +279,10 @@ func (this *Table) removeKeys(record *driver.Record) {
 
 func (this *Table) addKeys(record *driver.Record) {
 	for name, keys := range record.Keys {
+		// fmt.Printf("addKeys: (%v, %v)\n", name, keys)
 		index, ok := this.keys[name]
 		if !ok {
-			index = NewIndex(name)
+			index = newIndex(name)
 			this.keys[name] = index
 		}
 		for _, key := range keys {

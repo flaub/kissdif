@@ -21,7 +21,7 @@ func init() {
 func NewRecord(id, doc string) *driver.Record {
 	return &driver.Record{
 		Id:   id,
-		Doc:  []byte(doc),
+		Doc:  doc,
 		Keys: make(map[string][]string),
 	}
 }

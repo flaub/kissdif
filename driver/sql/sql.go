@@ -32,6 +32,8 @@ SELECT
 	_id, _rev, doc
 FROM
 	R_%v%v
+ORDER BY
+	_id
 LIMIT ?
 `
 	sqlIndexQuery = `
@@ -42,13 +44,15 @@ FROM
 JOIN
 	I_%v i
 	USING(_id)%v
+ORDER BY
+	i.value
 LIMIT ?
 `
 	sqlRecordReplace = "REPLACE INTO R_%v (_id, _rev, doc) VALUES (?, ?, ?)"
 	sqlIndexAttach   = "INSERT INTO I_%v (_id, name, value) VALUES (?, ?, ?)"
 	sqlIndexDetach   = "DELETE FROM I_%v WHERE name = ? AND value = ?"
 	sqlRecordDelete  = "DELETE FROM R_%v WHERE _id = ?"
-	sqlIndexDelete   = "DELETE FROM I_%v WHERE _id = ?"
+	sqlIndexDelete   = "DELETE FROM I_%v WHERE _id = ?" // FIXME: this results in a table scan
 )
 
 type Driver struct {
@@ -334,6 +338,7 @@ func (this *Table) Put(record *driver.Record) *driver.Error {
 		return err
 	}
 	defer session.close()
+	// FIXME: this results in a table scan
 	err = session.add(sqlIndexDelete, record.Id)
 	if err != nil {
 		return err

@@ -50,17 +50,41 @@ type Query struct {
 	Limit int
 }
 
+func (this *Query) String() string {
+	str := fmt.Sprintf("[%d] ", this.Limit)
+	if this.Lower != nil {
+		str += this.Lower.Value
+		if this.Lower.Inclusive {
+			str += " <= "
+		} else {
+			str += " < "
+		}
+	}
+	str += this.Index
+	if this.Upper != nil {
+		if this.Upper.Inclusive {
+			str += " <= "
+		} else {
+			str += " < "
+		}
+		str += this.Upper.Value
+	}
+	return str
+}
+
 type Table interface {
 	Get(query *Query) (chan (*Record), *Error)
 	Put(record *Record) *Error
 	Delete(id string) *Error
 }
 
+type IndexMap map[string][]string
+
 type Record struct {
-	Id   string              `json:"id"`
-	Rev  string              `json:"rev"`
-	Doc  []byte              `json:"doc"`
-	Keys map[string][]string `json:"keys",omitempty`
+	Id   string   `json:"id"`
+	Rev  string   `json:"rev"`
+	Doc  string   `json:"doc"`
+	Keys IndexMap `json:"keys",omitempty`
 }
 
 type Error struct {
