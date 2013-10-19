@@ -32,7 +32,13 @@ type Table struct {
 	mutex sync.RWMutex
 }
 
-type recordById map[string]*driver.Record
+type recordById struct {
+	records map[string]*driver.Record
+}
+
+type sentinel struct {
+	key string
+}
 
 var (
 	collator *collate.Collator
@@ -119,6 +125,7 @@ func (this *Table) Put(newRecord *driver.Record) *driver.Error {
 		this.removeKeys(record)
 		record.Rev = newRecord.Rev
 		record.Doc = newRecord.Doc
+		record.Keys = newRecord.Keys
 	} else {
 		record = newRecord
 		primary.tree.Set(record.Id, record)
@@ -141,25 +148,17 @@ func (this *Table) Delete(id string) *driver.Error {
 	return nil
 }
 
-type sentinel struct {
-	key string
-}
-
-func findEnd(tree *b.Tree, upper *driver.Bound) *sentinel {
-	if upper == nil {
-		return nil
-	}
-	cursor, hit := tree.Seek(upper.Value)
-	for {
-		key, _, err := cursor.Next()
-		if err == io.EOF {
-			return nil
+func emit(query *driver.Query, value interface{}, ch chan<- (*driver.Record)) {
+	if query.Index == "_id" {
+		ch <- value.(*driver.Record)
+	} else {
+		node, ok := value.(*recordById)
+		if !ok {
+			panic("Downcast to recordById failed")
 		}
-		if !hit || !upper.Inclusive {
-			return &sentinel{key.(string)}
-		}
-		if key != upper.Value {
-			return &sentinel{key.(string)}
+		for _, v := range node.records {
+			// fmt.Printf("emit: %v\n", v)
+			ch <- v
 		}
 	}
 }
@@ -188,22 +187,9 @@ func (this *Table) Get(query *driver.Query) (chan (*driver.Record), *driver.Erro
 	// 	this.mutex.RUnlock()
 	// 	return nil, driver.NewError(http.StatusNotFound, "No records found")
 	// }
-	end := findEnd(index.tree, query.Upper)
+	end := index.findEnd(query.Upper)
 	ch := make(chan (*driver.Record))
 	go func() {
-		count := 0
-		emit := func(value interface{}) bool {
-			if query.Index == "_id" {
-				ch <- value.(*driver.Record)
-			} else {
-				node := value.(recordById)
-				for _, v := range node {
-					ch <- v
-				}
-			}
-			count++
-			return count < query.Limit
-		}
 		// fmt.Printf("Query: (%v, %v)\n", query.Lower, query.Upper)
 		defer this.mutex.RUnlock()
 		defer close(ch)
@@ -211,6 +197,7 @@ func (this *Table) Get(query *driver.Query) (chan (*driver.Record), *driver.Erro
 			ch <- nil
 			return
 		}
+		count := 0
 		for {
 			key, value, err := cur.Next()
 			// fmt.Printf("Enumerating: [%d] %v %v\n", i, key, err)
@@ -221,13 +208,14 @@ func (this *Table) Get(query *driver.Query) (chan (*driver.Record), *driver.Erro
 			if hit && key == query.Lower.Value && !query.Lower.Inclusive {
 				continue
 			}
-			if !emit(value) {
+			emit(query, value, ch)
+			count++
+			if count == query.Limit {
 				_, _, err := cur.Next()
 				if err == io.EOF {
 					ch <- nil
-					return
 				}
-				break
+				return
 			}
 		}
 	}()
@@ -242,37 +230,65 @@ func (this *Table) getIndex(name string) *Index {
 	return index
 }
 
-func addRecord(tree *b.Tree, key string, record *driver.Record) {
-	// fmt.Printf("addRecord: (%v, %v)\n", tree, key)
-	var node recordById
-	raw, ok := tree.Get(key)
-	if ok {
-		node = raw.(recordById)
-	} else {
-		node = make(recordById)
-		tree.Set(key, node)
+func (this *Index) findEnd(upper *driver.Bound) *sentinel {
+	if upper == nil {
+		return nil
 	}
-	node[record.Id] = record
+	cursor, hit := this.tree.Seek(upper.Value)
+	for {
+		key, _, err := cursor.Next()
+		if err == io.EOF {
+			return nil
+		}
+		if !hit || !upper.Inclusive {
+			return &sentinel{key.(string)}
+		}
+		if key != upper.Value {
+			return &sentinel{key.(string)}
+		}
+	}
 }
 
-func removeRecord(tree *b.Tree, key string, record *driver.Record) {
-	var node recordById
-	raw, ok := tree.Get(key)
+func (this *Index) add(key string, record *driver.Record) {
+	// fmt.Printf("addRecord: (%v, %v)\n", tree, key)
+	var node *recordById
+	raw, ok := this.tree.Get(key)
+	if ok {
+		node, ok = raw.(*recordById)
+		if !ok {
+			panic("Downcast to recordById failed")
+		}
+	} else {
+		node = &recordById{make(map[string]*driver.Record)}
+		this.tree.Set(key, node)
+	}
+	node.records[record.Id] = record
+}
+
+func (this *Index) remove(key string, record *driver.Record) {
+	var node *recordById
+	raw, ok := this.tree.Get(key)
 	if !ok {
 		return
 	}
-	node = raw.(recordById)
-	delete(node, record.Id)
-	if len(node) == 0 {
-		tree.Delete(key)
+	node, ok = raw.(*recordById)
+	if !ok {
+		panic("Downcast to recordById failed")
+	}
+	delete(node.records, record.Id)
+	// fmt.Printf("removeRecord: %v, %v, %v\n", key, record.Id, node)
+	if len(node.records) == 0 {
+		// fmt.Printf("removeRecord: Delete key: %v\n", key)
+		this.tree.Delete(key)
 	}
 }
 
 func (this *Table) removeKeys(record *driver.Record) {
 	for name, keys := range record.Keys {
+		// fmt.Printf("removeKeys: %v, %v\n", name, keys)
 		index := this.keys[name]
 		for _, key := range keys {
-			removeRecord(index.tree, key, record)
+			index.remove(key, record)
 		}
 	}
 }
@@ -286,7 +302,7 @@ func (this *Table) addKeys(record *driver.Record) {
 			this.keys[name] = index
 		}
 		for _, key := range keys {
-			addRecord(index.tree, key, record)
+			index.add(key, record)
 		}
 	}
 }
