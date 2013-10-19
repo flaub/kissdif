@@ -272,11 +272,6 @@ func (this *Table) Put(record *driver.Record) (string, *driver.Error) {
 	if err != nil {
 		return "", driver.NewError(http.StatusInternalServerError, err.Error())
 	}
-	_, err = tx.Exec(compile(sqlIndexDelete, this.name, ""), record.Id)
-	if err != nil {
-		tx.Rollback()
-		return "", driver.NewError(http.StatusInternalServerError, err.Error())
-	}
 	if record.Rev == "" {
 		_, err = tx.Exec(compile(sqlRecordInsert, this.name, ""), record.Id, rev, record.Doc)
 		if err != nil {
@@ -291,6 +286,11 @@ func (this *Table) Put(record *driver.Record) (string, *driver.Error) {
 			tx.Rollback()
 			return "", driver.NewError(http.StatusConflict, "Document update conflict")
 		}
+	}
+	_, err = tx.Exec(compile(sqlIndexDelete, this.name, ""), record.Id)
+	if err != nil {
+		tx.Rollback()
+		return "", driver.NewError(http.StatusInternalServerError, err.Error())
 	}
 	for name, keys := range record.Keys {
 		for _, key := range keys {
