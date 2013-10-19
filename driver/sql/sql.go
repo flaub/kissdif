@@ -279,7 +279,7 @@ func (this *Table) prepareQuery(query *driver.Query) (*readyStmt, *driver.Error)
 	}
 
 	where, args := this.where(query)
-	args = append(args, query.Limit)
+	args = append(args, query.Limit+1)
 
 	var format string
 	var fmtArgs []interface{}
@@ -318,14 +318,19 @@ func (this *Table) Get(query *driver.Query) (chan (*driver.Record), *driver.Erro
 		defer ready.close()
 		defer rows.Close()
 		defer close(ch)
+		count := 0
 		for rows.Next() {
 			var record driver.Record
 			err := rows.Scan(&record.Id, &record.Rev, &record.Doc)
 			if err != nil {
 				fmt.Printf("Scan failed: %v\n", err)
-				break
+				return
+			}
+			if count == query.Limit {
+				return
 			}
 			ch <- &record
+			count++
 		}
 		ch <- nil
 	}()

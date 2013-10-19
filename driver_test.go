@@ -1,7 +1,7 @@
 package main
 
 import (
-	"github.com/flaub/kissdif/driver"
+	. "github.com/flaub/kissdif/driver"
 	"io/ioutil"
 	. "launchpad.net/gocheck"
 	"net/http"
@@ -10,8 +10,10 @@ import (
 
 type TestSuite struct {
 	name   string
-	env    driver.Environment
-	config driver.Dictionary
+	env    Environment
+	config Dictionary
+	table  Table
+	c      *C
 }
 
 type TestDriverMemory struct {
@@ -22,55 +24,51 @@ type TestDriverSql struct {
 	TestSuite
 }
 
+type expectedQuery struct {
+	index    string
+	lower    *Bound
+	upper    *Bound
+	expected []string
+}
+
 func init() {
 	Suite(&TestDriverMemory{TestSuite: TestSuite{name: "mem"}})
 	Suite(&TestDriverSql{TestSuite: TestSuite{name: "sql"}})
 }
 
-func putValues(c *C, table driver.Table, values ...string) {
+func (this *TestSuite) putValues(values ...string) {
 	for _, value := range values {
-		record := &driver.Record{Id: value, Doc: value}
-		err := table.Put(record)
-		c.Assert(err, IsNil)
+		record := &Record{Id: value, Doc: value}
+		err := this.table.Put(record)
+		this.c.Assert(err, IsNil)
 	}
 }
 
-func putRecord(c *C, table driver.Table, value string, keys driver.IndexMap) {
-	record := &driver.Record{Id: value, Doc: value, Keys: keys}
-	err := table.Put(record)
-	c.Assert(err, IsNil)
+func (this *TestSuite) putRecord(value string, keys IndexMap) {
+	this.putRecordKey(value, value, keys)
 }
 
-func putRecordKey(c *C, table driver.Table, key, value string, keys driver.IndexMap) {
-	record := &driver.Record{Id: key, Doc: value, Keys: keys}
-	err := table.Put(record)
-	c.Assert(err, IsNil)
+func (this *TestSuite) putRecordKey(key, value string, keys IndexMap) {
+	record := &Record{Id: key, Doc: value, Keys: keys}
+	err := this.table.Put(record)
+	this.c.Assert(err, IsNil)
 }
 
 // mb = make bound
-func mb(value string, inclusive bool) *driver.Bound {
-	return &driver.Bound{inclusive, value}
+func mb(value string, inclusive bool) *Bound {
+	return &Bound{inclusive, value}
 }
 
-type expectedQuery struct {
-	index    string
-	lower    *driver.Bound
-	upper    *driver.Bound
-	expected []string
-}
-
-type expectedQuerySet []expectedQuery
-
-func (this expectedQuery) expect(c *C, table driver.Table, expectedEof bool, limit int) {
-	query := &driver.Query{
+func (this *TestSuite) expect(test expectedQuery, expectedEof bool, limit int) {
+	query := &Query{
 		Limit: limit,
-		Index: this.index,
-		Lower: this.lower,
-		Upper: this.upper,
+		Index: test.index,
+		Lower: test.lower,
+		Upper: test.upper,
 	}
-	c.Logf("Query: %v", query)
-	ch, err := table.Get(query)
-	c.Assert(err, IsNil)
+	this.c.Logf("Query: %v", query)
+	ch, err := this.table.Get(query)
+	this.c.Assert(err, IsNil)
 	actual := []string{}
 	eof := false
 	for record := range ch {
@@ -80,21 +78,14 @@ func (this expectedQuery) expect(c *C, table driver.Table, expectedEof bool, lim
 			actual = append(actual, record.Doc)
 		}
 	}
-	c.Check(actual, DeepEquals, this.expected)
-	c.Check(eof, Equals, expectedEof)
+	this.c.Check(actual, DeepEquals, test.expected)
+	this.c.Check(eof, Equals, expectedEof)
 }
 
-func (this expectedQuerySet) run(c *C, table driver.Table, eof bool, limit int) {
-	for _, test := range this {
-		test.expect(c, table, eof, limit)
+func (this *TestSuite) run(eof bool, limit int, set []expectedQuery) {
+	for _, test := range set {
+		this.expect(test, eof, limit)
 	}
-}
-
-func (this *TestSuite) SetUpTest(c *C) {
-	db, err := driver.Open(this.name)
-	this.env, err = db.Configure("env", this.config)
-	c.Assert(err, IsNil)
-	c.Assert(this.env, NotNil)
 }
 
 func getTemp(c *C) string {
@@ -104,8 +95,18 @@ func getTemp(c *C) string {
 	return ftmp.Name()
 }
 
+func (this *TestSuite) SetUpTest(c *C) {
+	db, err := Open(this.name)
+	this.env, err = db.Configure("env", this.config)
+	c.Assert(err, IsNil)
+	c.Assert(this.env, NotNil)
+	this.table, err = this.env.GetTable("table", true)
+	c.Assert(err, IsNil)
+	c.Assert(this.table, NotNil)
+}
+
 func (this *TestDriverSql) SetUpTest(c *C) {
-	this.config = make(driver.Dictionary)
+	this.config = make(Dictionary)
 	this.config["dsn"] = getTemp(c) + ".db"
 	this.TestSuite.SetUpTest(c)
 }
@@ -117,17 +118,14 @@ func (this *TestDriverSql) TearDownTest(c *C) {
 }
 
 func (this *TestSuite) TestBasic(c *C) {
-	table, err := this.env.GetTable("table", true)
-	c.Assert(err, IsNil)
-	c.Assert(table, NotNil)
-
-	query := &driver.Query{}
-	_, err = table.Get(query)
+	this.c = c
+	query := &Query{}
+	_, err := this.table.Get(query)
 	c.Assert(err, ErrorMatches, "Invalid index")
 	c.Assert(err.Status, Equals, http.StatusBadRequest)
 
 	query.Index = "_id"
-	_, err = table.Get(query)
+	_, err = this.table.Get(query)
 	c.Assert(err, ErrorMatches, "Invalid limit")
 	c.Assert(err.Status, Equals, http.StatusBadRequest)
 
@@ -144,19 +142,17 @@ func (this *TestSuite) TestBasic(c *C) {
 	// c.Assert(err, ErrorMatches, "No records found")
 	// c.Assert(err.Status, Equals, http.StatusNotFound)
 
-	putValues(c, table, "a")
-	expectedQuerySet{
+	this.putValues("a")
+	this.run(true, 10, []expectedQuery{
 		{"_id", nil, nil, []string{"a"}},
-	}.run(c, table, true, 10)
+	})
 }
 
 func (this *TestSuite) TestLowerBound(c *C) {
-	table, err := this.env.GetTable("table", true)
-	c.Assert(err, IsNil)
+	this.c = c
+	this.putValues("b", "c", "d")
 
-	putValues(c, table, "b", "c", "d")
-
-	expectedQuerySet{
+	this.run(true, 10, []expectedQuery{
 		{"_id", mb("a", true), nil, []string{"b", "c", "d"}},
 		{"_id", mb("a", false), nil, []string{"b", "c", "d"}},
 		{"_id", mb("b", true), nil, []string{"b", "c", "d"}},
@@ -167,16 +163,14 @@ func (this *TestSuite) TestLowerBound(c *C) {
 		{"_id", mb("d", false), nil, []string{}},
 		{"_id", mb("e", true), nil, []string{}},
 		{"_id", mb("e", false), nil, []string{}},
-	}.run(c, table, true, 10)
+	})
 }
 
 func (this *TestSuite) TestUpperBound(c *C) {
-	table, err := this.env.GetTable("table", true)
-	c.Assert(err, IsNil)
+	this.c = c
+	this.putValues("b", "c", "d")
 
-	putValues(c, table, "b", "c", "d")
-
-	expectedQuerySet{
+	this.run(true, 10, []expectedQuery{
 		{"_id", nil, mb("a", true), []string{}},
 		{"_id", nil, mb("a", false), []string{}},
 		{"_id", nil, mb("b", true), []string{"b"}},
@@ -187,16 +181,14 @@ func (this *TestSuite) TestUpperBound(c *C) {
 		{"_id", nil, mb("d", false), []string{"b", "c"}},
 		{"_id", nil, mb("e", true), []string{"b", "c", "d"}},
 		{"_id", nil, mb("e", false), []string{"b", "c", "d"}},
-	}.run(c, table, true, 10)
+	})
 }
 
 func (this *TestSuite) TestRange(c *C) {
-	table, err := this.env.GetTable("table", true)
-	c.Assert(err, IsNil)
+	this.c = c
+	this.putValues("b", "c", "d")
 
-	putValues(c, table, "b", "c", "d")
-
-	expectedQuerySet{
+	this.run(true, 10, []expectedQuery{
 		{"_id", mb("a", true), mb("a", true), []string{}},
 		{"_id", mb("b", true), mb("b", true), []string{"b"}},
 		{"_id", mb("c", true), mb("c", true), []string{"c"}},
@@ -208,32 +200,30 @@ func (this *TestSuite) TestRange(c *C) {
 		{"_id", mb("a", true), mb("b", true), []string{"b"}},
 		{"_id", mb("b", true), mb("e", true), []string{"b", "c", "d"}},
 		{"_id", mb("b", false), mb("e", true), []string{"c", "d"}},
-	}.run(c, table, true, 10)
+	})
 }
 
 func (this *TestSuite) TestMultiIndex(c *C) {
-	table, err := this.env.GetTable("table", true)
-	c.Assert(err, IsNil)
-
-	putRecord(c, table, "a", driver.IndexMap{
+	this.c = c
+	this.putRecord("a", IndexMap{
 		"x": []string{"a_x"},
 		"y": []string{"a_y"},
 	})
-	putRecord(c, table, "b", driver.IndexMap{
+	this.putRecord("b", IndexMap{
 		"x": []string{"b_x"},
 		"y": []string{"b_y"},
 	})
-	putRecord(c, table, "aa", driver.IndexMap{
+	this.putRecord("aa", IndexMap{
 		"x": []string{"a_x"},
 	})
-	putRecord(c, table, "c", driver.IndexMap{
+	this.putRecord("c", IndexMap{
 		"c": []string{"ccc"},
 	})
-	putRecord(c, table, "d", driver.IndexMap{
+	this.putRecord("d", IndexMap{
 		"x": []string{"d_x"},
 	})
 
-	expectedQuerySet{
+	this.run(true, 10, []expectedQuery{
 		{"_id", nil, nil, []string{"a", "aa", "b", "c", "d"}},
 		{"_id", mb("a", true), mb("a", true), []string{"a"}},
 		{"x", nil, nil, []string{"a", "aa", "b", "d"}},
@@ -241,66 +231,78 @@ func (this *TestSuite) TestMultiIndex(c *C) {
 		{"c", nil, nil, []string{"c"}},
 		{"x", mb("a_x", true), mb("a_x", true), []string{"a", "aa"}},
 		{"x", mb("a", true), mb("c", true), []string{"a", "aa", "b"}},
-	}.run(c, table, true, 10)
+	})
 }
 
 func (this *TestSuite) TestUpdates(c *C) {
-	table, err := this.env.GetTable("table", true)
-	c.Assert(err, IsNil)
-
+	this.c = c
 	// identical update
-	putRecord(c, table, "a", driver.IndexMap{
+	this.putRecord("a", IndexMap{
 		"x": []string{"a_x"},
 		"y": []string{"a_y"},
 	})
-	putRecord(c, table, "a", driver.IndexMap{
+	this.putRecord("a", IndexMap{
 		"x": []string{"a_x"},
 		"y": []string{"a_y"},
 	})
 	// modify value
-	putRecordKey(c, table, "b", "b", driver.IndexMap{
+	this.putRecordKey("b", "b", IndexMap{
 		"x": []string{"b_x"},
 		"y": []string{"b_y"},
 	})
-	putRecordKey(c, table, "b", "bb", driver.IndexMap{
+	this.putRecordKey("b", "bb", IndexMap{
 		"x": []string{"b_x"},
 		"y": []string{"b_y"},
 	})
 	// drop an alt key
-	putRecord(c, table, "c", driver.IndexMap{
+	this.putRecord("c", IndexMap{
 		"x": []string{"c_x"},
 		"y": []string{"c_y"},
 	})
-	putRecord(c, table, "c", driver.IndexMap{
+	this.putRecord("c", IndexMap{
 		"x": []string{"c_x"},
 	})
 	// drop all alt keys
-	putRecord(c, table, "d", driver.IndexMap{
+	this.putRecord("d", IndexMap{
 		"x": []string{"d_x"},
 		"y": []string{"d_y"},
 	})
-	putRecord(c, table, "d", driver.IndexMap{})
+	this.putRecord("d", IndexMap{})
 	// add extra alt key
-	putRecord(c, table, "e", driver.IndexMap{
+	this.putRecord("e", IndexMap{
 		"x": []string{"e_x"},
 	})
-	putRecord(c, table, "e", driver.IndexMap{
+	this.putRecord("e", IndexMap{
 		"x": []string{"e_x"},
 		"y": []string{"e_y"},
 	})
 	// add another record to index
-	putRecord(c, table, "f", driver.IndexMap{
+	this.putRecord("f", IndexMap{
 		"x": []string{"a_x"},
 	})
 	// remove extra record from index
-	putRecord(c, table, "g", driver.IndexMap{
+	this.putRecord("g", IndexMap{
 		"x": []string{"a_x"},
 	})
-	putRecord(c, table, "g", driver.IndexMap{})
+	this.putRecord("g", IndexMap{})
 
-	expectedQuerySet{
+	this.run(true, 10, []expectedQuery{
 		{"_id", nil, nil, []string{"a", "bb", "c", "d", "e", "f", "g"}},
 		{"x", nil, nil, []string{"a", "f", "bb", "c", "e"}},
 		{"y", nil, nil, []string{"a", "bb", "e"}},
-	}.run(c, table, true, 10)
+	})
+}
+
+func (this *TestSuite) TestLimit(c *C) {
+	this.c = c
+	this.putValues("1", "2", "3")
+	this.run(false, 1, []expectedQuery{
+		{"_id", nil, nil, []string{"1"}},
+	})
+	this.run(false, 2, []expectedQuery{
+		{"_id", nil, nil, []string{"1", "2"}},
+	})
+	this.run(true, 3, []expectedQuery{
+		{"_id", nil, nil, []string{"1", "2", "3"}},
+	})
 }
