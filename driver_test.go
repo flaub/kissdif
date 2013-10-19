@@ -82,7 +82,7 @@ func (this *TestSuite) expect(test expectedQuery, expectedEof bool, limit int) {
 	this.c.Check(eof, Equals, expectedEof)
 }
 
-func (this *TestSuite) run(eof bool, limit int, set []expectedQuery) {
+func (this *TestSuite) query(eof bool, limit int, set []expectedQuery) {
 	for _, test := range set {
 		this.expect(test, eof, limit)
 	}
@@ -143,7 +143,7 @@ func (this *TestSuite) TestBasic(c *C) {
 	// c.Assert(err.Status, Equals, http.StatusNotFound)
 
 	this.putValues("a")
-	this.run(true, 10, []expectedQuery{
+	this.query(true, 10, []expectedQuery{
 		{"_id", nil, nil, []string{"a"}},
 	})
 }
@@ -152,7 +152,7 @@ func (this *TestSuite) TestLowerBound(c *C) {
 	this.c = c
 	this.putValues("b", "c", "d")
 
-	this.run(true, 10, []expectedQuery{
+	this.query(true, 10, []expectedQuery{
 		{"_id", mb("a", true), nil, []string{"b", "c", "d"}},
 		{"_id", mb("a", false), nil, []string{"b", "c", "d"}},
 		{"_id", mb("b", true), nil, []string{"b", "c", "d"}},
@@ -170,7 +170,7 @@ func (this *TestSuite) TestUpperBound(c *C) {
 	this.c = c
 	this.putValues("b", "c", "d")
 
-	this.run(true, 10, []expectedQuery{
+	this.query(true, 10, []expectedQuery{
 		{"_id", nil, mb("a", true), []string{}},
 		{"_id", nil, mb("a", false), []string{}},
 		{"_id", nil, mb("b", true), []string{"b"}},
@@ -188,7 +188,7 @@ func (this *TestSuite) TestRange(c *C) {
 	this.c = c
 	this.putValues("b", "c", "d")
 
-	this.run(true, 10, []expectedQuery{
+	this.query(true, 10, []expectedQuery{
 		{"_id", mb("a", true), mb("a", true), []string{}},
 		{"_id", mb("b", true), mb("b", true), []string{"b"}},
 		{"_id", mb("c", true), mb("c", true), []string{"c"}},
@@ -223,7 +223,7 @@ func (this *TestSuite) TestMultiIndex(c *C) {
 		"x": []string{"d_x"},
 	})
 
-	this.run(true, 10, []expectedQuery{
+	this.query(true, 10, []expectedQuery{
 		{"_id", nil, nil, []string{"a", "aa", "b", "c", "d"}},
 		{"_id", mb("a", true), mb("a", true), []string{"a"}},
 		{"x", nil, nil, []string{"a", "aa", "b", "d"}},
@@ -286,7 +286,7 @@ func (this *TestSuite) TestUpdates(c *C) {
 	})
 	this.putRecord("g", IndexMap{})
 
-	this.run(true, 10, []expectedQuery{
+	this.query(true, 10, []expectedQuery{
 		{"_id", nil, nil, []string{"a", "bb", "c", "d", "e", "f", "g"}},
 		{"x", nil, nil, []string{"a", "f", "bb", "c", "e"}},
 		{"y", nil, nil, []string{"a", "bb", "e"}},
@@ -296,13 +296,13 @@ func (this *TestSuite) TestUpdates(c *C) {
 func (this *TestSuite) TestLimit(c *C) {
 	this.c = c
 	this.putValues("1", "2", "3")
-	this.run(false, 1, []expectedQuery{
+	this.query(false, 1, []expectedQuery{
 		{"_id", nil, nil, []string{"1"}},
 	})
-	this.run(false, 2, []expectedQuery{
+	this.query(false, 2, []expectedQuery{
 		{"_id", nil, nil, []string{"1", "2"}},
 	})
-	this.run(true, 3, []expectedQuery{
+	this.query(true, 3, []expectedQuery{
 		{"_id", nil, nil, []string{"1", "2", "3"}},
 	})
 }
