@@ -306,3 +306,27 @@ func (this *TestSuite) TestLimit(c *C) {
 		{"_id", nil, nil, []string{"1", "2", "3"}},
 	})
 }
+
+func (this *TestSuite) TestDelete(c *C) {
+	this.c = c
+	this.putValues("a", "b")
+	this.putRecord("c", IndexMap{
+		"x": []string{"x"},
+	})
+	this.c.Assert(this.table.Delete("a"), IsNil)
+	this.query(true, 10, []expectedQuery{
+		{"_id", nil, nil, []string{"b", "c"}},
+		{"x", nil, nil, []string{"c"}},
+	})
+	this.c.Assert(this.table.Delete("a"), IsNil)
+	this.c.Assert(this.table.Delete("b"), IsNil)
+	this.query(true, 10, []expectedQuery{
+		{"_id", nil, nil, []string{"c"}},
+		{"x", nil, nil, []string{"c"}},
+	})
+	this.c.Assert(this.table.Delete("c"), IsNil)
+	this.query(true, 10, []expectedQuery{
+		{"_id", nil, nil, []string{}},
+		{"x", nil, nil, []string{}},
+	})
+}

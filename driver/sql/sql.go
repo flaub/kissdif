@@ -360,17 +360,22 @@ func (this *Table) Put(record *driver.Record) *driver.Error {
 			}
 		}
 	}
-	err = session.exec()
-	if err != nil {
-		return err
-	}
-	return nil
+	return session.exec()
 }
 
 func (this *Table) Delete(id string) *driver.Error {
-	return driver.NewError(http.StatusNotImplemented, "Not implemented")
-}
-
-func (this *Table) Query() *driver.Error {
-	return driver.NewError(http.StatusNotImplemented, "Not implemented")
+	session, err := this.env.newSession(this.name)
+	if err != nil {
+		return err
+	}
+	defer session.close()
+	err = session.add(sqlIndexDelete, id)
+	if err != nil {
+		return err
+	}
+	err = session.add(sqlRecordDelete, id)
+	if err != nil {
+		return err
+	}
+	return session.exec()
 }
