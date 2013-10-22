@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"github.com/flaub/kissdif"
 	"github.com/flaub/kissdif/driver"
 	_ "github.com/flaub/kissdif/driver/mem"
 	_ "github.com/flaub/kissdif/driver/sql"
@@ -17,17 +18,6 @@ func main() {
 	fmt.Println("KISS Data Interface")
 	server := NewServer()
 	server.ListenAndServe()
-}
-
-type ResultSet struct {
-	IsTruncated bool
-	Count       int
-	Records     []*driver.Record
-}
-
-type EnvJson struct {
-	Name   string
-	Config map[string]string
 }
 
 type Server struct {
@@ -47,25 +37,16 @@ func NewServer() *Server {
 		envs: make(map[string]driver.Environment),
 	}
 
-	// router.HandleFunc("/{env}", this.PutEnv).
-	// 	Methods("PUT")
-	router.HandleFunc("/{env}/{table}/{index}/{key:.+}", this.Get).
-		Methods("GET")
-	router.HandleFunc("/{env}/{table}/_id/{id:.+}", this.Put).
+	router.HandleFunc("/{env}", this.putEnv).
 		Methods("PUT")
-	router.HandleFunc("/{env}/{table}/_id/{id:.+}", this.Delete).
+	router.HandleFunc("/{env}/{table}/{index}/{key:.+}", this.getRecord).
+		Methods("GET")
+	router.HandleFunc("/{env}/{table}/_id/{id:.+}", this.putRecord).
+		Methods("PUT")
+	router.HandleFunc("/{env}/{table}/_id/{id:.+}", this.deleteRecord).
 		Methods("DELETE")
 
 	return this
-}
-
-func (this *Server) decodeBody(req *http.Request) (*driver.Record, *driver.Error) {
-	var msg driver.Record
-	err := json.NewDecoder(req.Body).Decode(&msg)
-	if err != nil {
-		return nil, driver.NewError(http.StatusBadRequest, err.Error())
-	}
-	return &msg, nil
 }
 
 func (this *Server) sendError(resp http.ResponseWriter, err *driver.Error) {
@@ -79,7 +60,7 @@ func (this *Server) sendJson(resp http.ResponseWriter, data interface{}) {
 	json.NewEncoder(resp).Encode(data)
 }
 
-func (this *Server) getEnvironment(name string) (driver.Environment, *driver.Error) {
+func (this *Server) findEnv(name string) (driver.Environment, *driver.Error) {
 	this.mutex.RLock()
 	defer this.mutex.RUnlock()
 	env, ok := this.envs[name]
@@ -89,16 +70,35 @@ func (this *Server) getEnvironment(name string) (driver.Environment, *driver.Err
 	return env, nil
 }
 
-// func (this *Server) PutEnv(resp http.ResponseWriter, req *http.Request) {
-// 	vars := mux.Vars(req)
-// 	env, err := this.getEnvironment(vars["env"], false)
-// 	if err != nil {
-// 		this.sendError(resp, err)
-// 		return
-// 	}
-// }
+func (this *Server) getEnv(resp http.ResponseWriter, req *http.Request) {
+}
 
-func (this *Server) Put(resp http.ResponseWriter, req *http.Request) {
+func (this *Server) putEnv(resp http.ResponseWriter, req *http.Request) {
+	vars := mux.Vars(req)
+	name := vars["env"]
+
+	var envJson kissdif.EnvJson
+	err := json.NewDecoder(req.Body).Decode(&envJson)
+	if err != nil {
+		this.sendError(resp, driver.NewError(http.StatusBadRequest, err.Error()))
+		return
+	}
+	db, err2 := driver.Open(envJson.Driver)
+	if err2 != nil {
+		this.sendError(resp, err2)
+		return
+	}
+	env, err2 := db.Configure(name, envJson.Config)
+	if err2 != nil {
+		this.sendError(resp, err2)
+		return
+	}
+	this.mutex.Lock()
+	defer this.mutex.Unlock()
+	this.envs[name] = env
+}
+
+func (this *Server) putRecord(resp http.ResponseWriter, req *http.Request) {
 	contentType := req.Header.Get("Content-Type")
 	if contentType != "application/json" {
 		err := driver.NewError(http.StatusBadRequest, fmt.Sprintf("Invalid content type: %v", contentType))
@@ -106,7 +106,7 @@ func (this *Server) Put(resp http.ResponseWriter, req *http.Request) {
 		return
 	}
 	vars := mux.Vars(req)
-	env, err := this.getEnvironment(vars["env"])
+	env, err := this.findEnv(vars["env"])
 	if err != nil {
 		this.sendError(resp, err)
 		return
@@ -116,17 +116,18 @@ func (this *Server) Put(resp http.ResponseWriter, req *http.Request) {
 		this.sendError(resp, err)
 		return
 	}
-	reqJson, err := this.decodeBody(req)
-	if err != nil {
-		this.sendError(resp, err)
+	var record driver.Record
+	err2 := json.NewDecoder(req.Body).Decode(&record)
+	if err2 != nil {
+		this.sendError(resp, driver.NewError(http.StatusBadRequest, err2.Error()))
 		return
 	}
 	id := vars["id"]
-	if reqJson.Id != id {
+	if record.Id != id {
 		this.sendError(resp, driver.NewError(http.StatusBadRequest, "ID Mismatch"))
 		return
 	}
-	_, err = table.Put(reqJson)
+	_, err = table.Put(&record)
 	if err != nil {
 		this.sendError(resp, err)
 		return
@@ -210,10 +211,10 @@ func getBounds(args url.Values) (lower, upper *driver.Bound, err *driver.Error) 
 	return
 }
 
-func (this *Server) Get(resp http.ResponseWriter, req *http.Request) {
+func (this *Server) getRecord(resp http.ResponseWriter, req *http.Request) {
 	args := req.URL.Query()
 	vars := mux.Vars(req)
-	env, err := this.getEnvironment(vars["env"])
+	env, err := this.findEnv(vars["env"])
 	if err != nil {
 		this.sendError(resp, err)
 		return
@@ -228,20 +229,21 @@ func (this *Server) Get(resp http.ResponseWriter, req *http.Request) {
 		this.sendError(resp, err)
 		return
 	}
-	lower, upper, err := getBounds(args)
+	// lower, upper, err := getBounds(args)
+	key := vars["key"]
+	bound := &driver.Bound{true, key}
 	query := &driver.Query{
 		Index: vars["index"],
 		Limit: limit,
-		Lower: lower,
-		Upper: upper,
+		Lower: bound,
+		Upper: bound,
 	}
-	fmt.Printf("Get: %v", query)
 	ch, err := table.Get(query)
 	if err != nil {
 		this.sendError(resp, err)
 		return
 	}
-	result := ResultSet{
+	result := kissdif.ResultSet{
 		IsTruncated: true,
 		Records:     []*driver.Record{},
 	}
@@ -249,20 +251,19 @@ func (this *Server) Get(resp http.ResponseWriter, req *http.Request) {
 		if record == nil {
 			result.IsTruncated = false
 		} else {
-			result.Count++
 			result.Records = append(result.Records, record)
 		}
 	}
-	if result.Count == 0 {
+	if len(result.Records) == 0 {
 		this.sendError(resp, driver.NewError(http.StatusNotFound, "Record not found"))
 		return
 	}
 	this.sendJson(resp, result)
 }
 
-func (this *Server) Delete(resp http.ResponseWriter, req *http.Request) {
+func (this *Server) deleteRecord(resp http.ResponseWriter, req *http.Request) {
 	vars := mux.Vars(req)
-	env, err := this.getEnvironment(vars["env"])
+	env, err := this.findEnv(vars["env"])
 	if err != nil {
 		this.sendError(resp, err)
 		return

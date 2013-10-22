@@ -67,12 +67,9 @@ WHERE _id = ? AND _rev = ?
 )
 
 type Driver struct {
-	mutex sync.RWMutex
-	envs  map[string]*Environment
 }
 
 type Environment struct {
-	driver *Driver
 	name   string
 	config driver.Dictionary
 	tables map[string]*Table
@@ -89,34 +86,28 @@ func init() {
 }
 
 func NewDriver() *Driver {
-	this := &Driver{
-		envs: make(map[string]*Environment),
-	}
-	return this
+	return new(Driver)
 }
 
 func (this *Driver) Configure(name string, config driver.Dictionary) (driver.Environment, *driver.Error) {
-	// fmt.Printf("Configuring %q with %v\n", name, config)
 	env := &Environment{
 		name:   name,
 		config: config,
-		driver: this,
 		tables: make(map[string]*Table),
 	}
-	this.mutex.Lock()
-	defer this.mutex.Unlock()
-	this.envs[name] = env
 	return env, nil
 }
 
-func (this *Driver) Open(name string) (driver.Environment, *driver.Error) {
-	this.mutex.RLock()
-	defer this.mutex.RUnlock()
-	env, ok := this.envs[name]
-	if !ok {
-		return nil, driver.NewError(http.StatusNotFound, "Environment not found")
-	}
-	return env, nil
+func (this *Environment) Name() string {
+	return this.name
+}
+
+func (this *Environment) Driver() string {
+	return "sql"
+}
+
+func (this *Environment) Config() driver.Dictionary {
+	return this.config
 }
 
 func (this *Environment) GetTable(name string, create bool) (driver.Table, *driver.Error) {

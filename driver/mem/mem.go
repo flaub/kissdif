@@ -13,11 +13,11 @@ import (
 )
 
 type Driver struct {
-	envs  map[string]*Environment
-	mutex sync.RWMutex
 }
 
 type Environment struct {
+	name   string
+	config driver.Dictionary
 	tables map[string]*Table
 	mutex  sync.RWMutex
 }
@@ -51,25 +51,28 @@ func init() {
 }
 
 func NewDriver() *Driver {
-	return &Driver{
-		envs: make(map[string]*Environment),
-	}
+	return new(Driver)
 }
 
 func (this *Driver) Configure(name string, config driver.Dictionary) (driver.Environment, *driver.Error) {
 	env := &Environment{
+		name:   name,
+		config: config,
 		tables: make(map[string]*Table),
 	}
-	this.envs[name] = env
 	return env, nil
 }
 
-func (this *Driver) Open(name string) (driver.Environment, *driver.Error) {
-	env, ok := this.envs[name]
-	if !ok {
-		return nil, driver.NewError(http.StatusNotFound, "Environment not found")
-	}
-	return env, nil
+func (this *Environment) Name() string {
+	return this.name
+}
+
+func (this *Environment) Driver() string {
+	return "mem"
+}
+
+func (this *Environment) Config() driver.Dictionary {
+	return this.config
 }
 
 func (this *Environment) GetTable(name string, create bool) (driver.Table, *driver.Error) {

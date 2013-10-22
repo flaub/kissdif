@@ -36,6 +36,9 @@ type Driver interface {
 }
 
 type Environment interface {
+	Name() string
+	Driver() string
+	Config() Dictionary
 	GetTable(name string, create bool) (Table, *Error)
 }
 

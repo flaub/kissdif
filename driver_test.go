@@ -1,11 +1,14 @@
-package main
+package kissdif
 
 import (
 	. "github.com/flaub/kissdif/driver"
+	_ "github.com/flaub/kissdif/driver/mem"
+	_ "github.com/flaub/kissdif/driver/sql"
 	"io/ioutil"
 	. "launchpad.net/gocheck"
 	"net/http"
 	"os"
+	"testing"
 )
 
 type TestSuite struct {
@@ -30,6 +33,9 @@ type expectedQuery struct {
 	upper    *Bound
 	expected []string
 }
+
+// Hook up gocheck into the "go test" runner.
+func Test(t *testing.T) { TestingT(t) }
 
 func init() {
 	Suite(&TestDriverMemory{TestSuite: TestSuite{name: "mem"}})
@@ -96,6 +102,7 @@ func getTemp(c *C) string {
 
 func (this *TestSuite) SetUpTest(c *C) {
 	db, err := Open(this.name)
+	c.Assert(err, IsNil)
 	this.env, err = db.Configure("env", this.config)
 	c.Assert(err, IsNil)
 	c.Assert(this.env, NotNil)
@@ -202,7 +209,7 @@ func (this *TestSuite) TestRange(c *C) {
 	})
 }
 
-func (this *TestSuite) TestMultiIndex(c *C) {
+func (this *TestSuite) TestAltKey(c *C) {
 	this.c = c
 	this.putRecord("a", IndexMap{
 		"x": []string{"a_x"},
@@ -221,15 +228,20 @@ func (this *TestSuite) TestMultiIndex(c *C) {
 	this.putRecord("d", IndexMap{
 		"x": []string{"d_x"},
 	})
+	this.putRecord("e", IndexMap{
+		"x": []string{"e_x1", "e_x2"},
+	})
 
 	this.query(true, 10, []expectedQuery{
-		{"_id", nil, nil, []string{"a", "aa", "b", "c", "d"}},
+		{"_id", nil, nil, []string{"a", "aa", "b", "c", "d", "e"}},
 		{"_id", mb("a", true), mb("a", true), []string{"a"}},
-		{"x", nil, nil, []string{"a", "aa", "b", "d"}},
+		{"x", nil, nil, []string{"a", "aa", "b", "d", "e", "e"}},
 		{"y", nil, nil, []string{"a", "b"}},
 		{"c", nil, nil, []string{"c"}},
 		{"x", mb("a_x", true), mb("a_x", true), []string{"a", "aa"}},
 		{"x", mb("a", true), mb("c", true), []string{"a", "aa", "b"}},
+		{"x", mb("e_x1", true), mb("e_x1", true), []string{"e"}},
+		{"x", mb("e", true), mb("f", true), []string{"e", "e"}},
 	})
 }
 

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"github.com/flaub/kissdif"
 	"github.com/flaub/kissdif/driver"
 	"io/ioutil"
 	. "launchpad.net/gocheck"
@@ -47,22 +48,23 @@ func (this *MainSuite) TestBasic(c *C) {
 
 	record := NewRecord("1", "Value")
 
-	client := NewKissClient(ts.URL, "mem", "table")
-
-	err := client.Put(record)
+	client := kissdif.NewClient(ts.URL)
+	err := client.PutEnv("mem", "mem", driver.Dictionary{})
 	c.Assert(err, IsNil)
 
-	result, err := client.Get(record.Id)
+	err = client.Put("mem", "table", record)
 	c.Assert(err, IsNil)
-	c.Assert(result.Count, Equals, 1)
+
+	result, err := client.Get("mem", "table", record.Id)
+	c.Assert(err, IsNil)
 	c.Assert(result.Records, HasLen, 1)
 	c.Assert(result.Records[0].Doc, Equals, record.Doc)
 
-	err = client.Delete(record.Id)
+	err = client.Delete("mem", "table", record.Id)
 	c.Assert(err, IsNil)
 
-	result, err = client.Get(record.Id)
-	c.Assert(err, ErrorMatches, "No records found")
+	result, err = client.Get("mem", "table", record.Id)
+	c.Assert(err, NotNil)
 }
 
 func (this *MainSuite) TestIndex(c *C) {
@@ -72,27 +74,28 @@ func (this *MainSuite) TestIndex(c *C) {
 	record := NewRecord("1", "Value")
 	record.Keys["by_name"] = []string{"Joe", "Bob"}
 
-	client := NewKissClient(ts.URL, "mem", "table")
+	client := kissdif.NewClient(ts.URL)
 
-	err := client.Put(record)
+	err := client.PutEnv("mem", "mem", driver.Dictionary{})
 	c.Assert(err, IsNil)
 
-	result, err := client.Get(record.Id)
+	err = client.Put("mem", "table", record)
 	c.Assert(err, IsNil)
-	c.Assert(result.Count, Equals, 1)
+
+	result, err := client.Get("mem", "table", record.Id)
+	c.Assert(err, IsNil)
 	c.Assert(result.Records, HasLen, 1)
 	c.Assert(result.Records[0].Doc, Equals, record.Doc)
 
-	result, err = client.GetWithIndex("by_name", "Joe")
+	result, err = client.GetBy("mem", "table", "by_name", "Joe")
 	c.Assert(err, IsNil)
-	c.Assert(result.Count, Equals, 1)
-	c.Assert(result.Records, HasLen, 1)
+	c.Assert(result.Records, HasLen, 1, Commentf("%v", result))
 	c.Assert(result.Records[0].Doc, Equals, record.Doc)
 
-	err = client.Delete(record.Id)
+	err = client.Delete("mem", "table", record.Id)
 	c.Assert(err, IsNil)
 
-	result, err = client.Get(record.Id)
+	result, err = client.Get("mem", "table", record.Id)
 	c.Assert(err, ErrorMatches, "Record not found")
 }
 
@@ -103,7 +106,7 @@ func (this *MainSuite) TestQuery(c *C) {
 	// record := NewRecord("1", "Value")
 	// record.Keys["by_name"] = []string{"Joe", "Bob"}
 
-	// client := NewKissClient(ts.URL, "mem", "table")
+	// client := NewClient(ts.URL, "mem", "table")
 
 	// err := client.Put(record)
 	// if err != nil {
