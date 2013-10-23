@@ -43,6 +43,41 @@ type Error struct {
 	Message string
 }
 
+func NewQuery(index string, lower, upper *Bound, limit int) *Query {
+	return &Query{index, lower, upper, limit}
+}
+
+func NewQueryEQ(index, key string, limit int) *Query {
+	bound := &Bound{true, key}
+	return &Query{index, bound, bound, limit}
+}
+
+func NewQueryGT(index, key string, limit int) *Query {
+	bound := &Bound{false, key}
+	return &Query{index, bound, nil, limit}
+}
+
+func NewQueryGTE(index, key string, limit int) *Query {
+	bound := &Bound{true, key}
+	return &Query{index, bound, nil, limit}
+}
+
+func NewQueryLT(index, key string, limit int) *Query {
+	bound := &Bound{false, key}
+	return &Query{index, nil, bound, limit}
+}
+
+func NewQueryLTE(index, key string, limit int) *Query {
+	bound := &Bound{true, key}
+	return &Query{index, nil, bound, limit}
+}
+
+func NewQueryRange(index, lower, upper string, limit int) *Query {
+	lb := &Bound{true, lower}
+	ub := &Bound{true, upper}
+	return &Query{index, lb, ub, limit}
+}
+
 func NewError(status int, message string) *Error {
 	return &Error{status, message}
 }

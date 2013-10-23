@@ -229,15 +229,7 @@ func (this *Server) getRecord(resp http.ResponseWriter, req *http.Request) {
 		this.sendError(resp, err)
 		return
 	}
-	// lower, upper, err := getBounds(args)
-	key := vars["key"]
-	bound := &Bound{true, key}
-	query := &Query{
-		Index: vars["index"],
-		Limit: limit,
-		Lower: bound,
-		Upper: bound,
-	}
+	query := NewQueryEQ(vars["index"], vars["key"], limit)
 	ch, err := table.Get(query)
 	if err != nil {
 		this.sendError(resp, err)

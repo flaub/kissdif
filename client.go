@@ -131,3 +131,7 @@ func (this *Client) Delete(env, table, id string) error {
 	}
 	return nil
 }
+
+func (this *Client) DoQuery(env, table, string, query *Query) error {
+	return nil
+}
