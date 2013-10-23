@@ -7,8 +7,8 @@ import (
 type Dictionary map[string]string
 
 type ResultSet struct {
-	IsTruncated bool
-	Records     []*Record
+	More    bool
+	Records []*Record
 }
 
 type EnvJson struct {
@@ -96,7 +96,7 @@ func (this *ResultSet) String() string {
 	for _, record := range this.Records[1:] {
 		ret += fmt.Sprintf(", %v", record.Id)
 	}
-	if this.IsTruncated {
+	if this.More {
 		ret += ", ..."
 	}
 	ret += "]"

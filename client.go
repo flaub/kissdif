@@ -20,15 +20,6 @@ func NewClient(baseUrl string) *Client {
 	}
 }
 
-func (this *Client) Query(query *Query) (*ResultSet, error) {
-	args := url.Values{}
-	// args.Add("eq", key)
-	if query.Limit != 0 {
-		args.Set("limit", strconv.Itoa(query.Limit))
-	}
-	return nil, nil
-}
-
 func (this *Client) PutEnv(name, driver string, config Dictionary) error {
 	url := fmt.Sprintf("%s/%s", this.baseUrl, name)
 	envJson := &EnvJson{
@@ -61,27 +52,48 @@ func (this *Client) PutEnv(name, driver string, config Dictionary) error {
 	return nil
 }
 
-func (this *Client) Get(env, table, id string) (*ResultSet, error) {
+func (this *Client) Get(env, table, id string) (*Record, error) {
 	return this.GetBy(env, table, "_id", id)
 }
 
-func (this *Client) GetBy(env, table, index, key string) (*ResultSet, error) {
+func (this *Client) GetBy(env, table, index, key string) (*Record, error) {
 	url := fmt.Sprintf("%s/%s/%s/%s/%s", this.baseUrl, env, table, index, key)
-	resp, err := http.Get(url)
+	result, err := this.processQuery(url)
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		body, err := ioutil.ReadAll(resp.Body)
-		if err != nil {
-			return nil, err
-		}
-		return nil, fmt.Errorf("%s", body)
+	if len(result.Records) != 1 {
+		return nil, fmt.Errorf("Invalid result")
 	}
-	var result ResultSet
-	json.NewDecoder(resp.Body).Decode(&result)
-	return &result, nil
+	return result.Records[0], nil
+}
+
+func (this *Client) Query(env, table string, query *Query) (*ResultSet, error) {
+	args := make(url.Values)
+	if query.Limit != 0 {
+		args.Set("limit", strconv.Itoa(query.Limit))
+	}
+	if query.Lower != nil && query.Upper != nil &&
+		query.Lower.Value == query.Upper.Value {
+		args.Set("eq", query.Lower.Value)
+	} else {
+		if query.Lower != nil {
+			if query.Lower.Inclusive {
+				args.Set("ge", query.Lower.Value)
+			} else {
+				args.Set("gt", query.Lower.Value)
+			}
+		}
+		if query.Upper != nil {
+			if query.Upper.Inclusive {
+				args.Set("le", query.Upper.Value)
+			} else {
+				args.Set("lt", query.Upper.Value)
+			}
+		}
+	}
+	url := fmt.Sprintf("%s/%s/%s/%s?%s", this.baseUrl, env, table, query.Index, args.Encode())
+	return this.processQuery(url)
 }
 
 func (this *Client) Put(env, table string, record *Record) error {
@@ -132,6 +144,20 @@ func (this *Client) Delete(env, table, id string) error {
 	return nil
 }
 
-func (this *Client) DoQuery(env, table, string, query *Query) error {
-	return nil
+func (this *Client) processQuery(url string) (*ResultSet, error) {
+	resp, err := http.Get(url)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		body, err := ioutil.ReadAll(resp.Body)
+		if err != nil {
+			return nil, err
+		}
+		return nil, fmt.Errorf("%s", body)
+	}
+	var result ResultSet
+	json.NewDecoder(resp.Body).Decode(&result)
+	return &result, nil
 }

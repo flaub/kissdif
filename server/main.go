@@ -39,6 +39,8 @@ func NewServer() *Server {
 
 	router.HandleFunc("/{env}", this.putEnv).
 		Methods("PUT")
+	router.HandleFunc("/{env}/{table}/{index}", this.doQuery).
+		Methods("GET")
 	router.HandleFunc("/{env}/{table}/{index}/{key:.+}", this.getRecord).
 		Methods("GET")
 	router.HandleFunc("/{env}/{table}/_id/{id:.+}", this.putRecord).
@@ -134,6 +136,103 @@ func (this *Server) putRecord(resp http.ResponseWriter, req *http.Request) {
 	}
 }
 
+func (this *Server) doQuery(resp http.ResponseWriter, req *http.Request) {
+	args := req.URL.Query()
+	vars := mux.Vars(req)
+	env, err := this.findEnv(vars["env"])
+	if err != nil {
+		this.sendError(resp, err)
+		return
+	}
+	table, err := env.GetTable(vars["table"], false)
+	if err != nil {
+		this.sendError(resp, err)
+		return
+	}
+	lower, upper, err := getBounds(args)
+	if err != nil {
+		this.sendError(resp, err)
+		return
+	}
+	limit, err := getLimit(args)
+	if err != nil {
+		this.sendError(resp, err)
+		return
+	}
+	query := NewQuery(vars["index"], lower, upper, limit)
+	result, err := this.processQuery(table, query)
+	if err != nil {
+		this.sendError(resp, err)
+		return
+	}
+	this.sendJson(resp, result)
+}
+
+func (this *Server) getRecord(resp http.ResponseWriter, req *http.Request) {
+	args := req.URL.Query()
+	vars := mux.Vars(req)
+	env, err := this.findEnv(vars["env"])
+	if err != nil {
+		this.sendError(resp, err)
+		return
+	}
+	table, err := env.GetTable(vars["table"], false)
+	if err != nil {
+		this.sendError(resp, err)
+		return
+	}
+	limit, err := getLimit(args)
+	if err != nil {
+		this.sendError(resp, err)
+		return
+	}
+	query := NewQueryEQ(vars["index"], vars["key"], limit)
+	result, err := this.processQuery(table, query)
+	if err != nil {
+		this.sendError(resp, err)
+		return
+	}
+	if len(result.Records) == 0 {
+		this.sendError(resp, NewError(http.StatusNotFound, "Record not found"))
+		return
+	}
+	this.sendJson(resp, result)
+}
+
+func (this *Server) deleteRecord(resp http.ResponseWriter, req *http.Request) {
+	vars := mux.Vars(req)
+	env, err := this.findEnv(vars["env"])
+	if err != nil {
+		this.sendError(resp, err)
+		return
+	}
+	table, err := env.GetTable(vars["table"], true)
+	if err != nil {
+		this.sendError(resp, err)
+		return
+	}
+	table.Delete(vars["id"])
+}
+
+func (this *Server) processQuery(table driver.Table, query *Query) (*ResultSet, *Error) {
+	ch, err := table.Get(query)
+	if err != nil {
+		return nil, err
+	}
+	result := &ResultSet{
+		More:    true,
+		Records: []*Record{},
+	}
+	for record := range ch {
+		if record == nil {
+			result.More = false
+		} else {
+			result.Records = append(result.Records, record)
+		}
+	}
+	return result, nil
+}
+
 func getLimit(args url.Values) (int, *Error) {
 	var limit int = 1000
 	strLimit := args.Get("limit")
@@ -209,61 +308,4 @@ func getBounds(args url.Values) (lower, upper *Bound, err *Error) {
 		}
 	}
 	return
-}
-
-func (this *Server) getRecord(resp http.ResponseWriter, req *http.Request) {
-	args := req.URL.Query()
-	vars := mux.Vars(req)
-	env, err := this.findEnv(vars["env"])
-	if err != nil {
-		this.sendError(resp, err)
-		return
-	}
-	table, err := env.GetTable(vars["table"], false)
-	if err != nil {
-		this.sendError(resp, err)
-		return
-	}
-	limit, err := getLimit(args)
-	if err != nil {
-		this.sendError(resp, err)
-		return
-	}
-	query := NewQueryEQ(vars["index"], vars["key"], limit)
-	ch, err := table.Get(query)
-	if err != nil {
-		this.sendError(resp, err)
-		return
-	}
-	result := ResultSet{
-		IsTruncated: true,
-		Records:     []*Record{},
-	}
-	for record := range ch {
-		if record == nil {
-			result.IsTruncated = false
-		} else {
-			result.Records = append(result.Records, record)
-		}
-	}
-	if len(result.Records) == 0 {
-		this.sendError(resp, NewError(http.StatusNotFound, "Record not found"))
-		return
-	}
-	this.sendJson(resp, result)
-}
-
-func (this *Server) deleteRecord(resp http.ResponseWriter, req *http.Request) {
-	vars := mux.Vars(req)
-	env, err := this.findEnv(vars["env"])
-	if err != nil {
-		this.sendError(resp, err)
-		return
-	}
-	table, err := env.GetTable(vars["table"], true)
-	if err != nil {
-		this.sendError(resp, err)
-		return
-	}
-	table.Delete(vars["id"])
 }

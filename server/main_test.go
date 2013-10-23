@@ -56,8 +56,7 @@ func (this *MainSuite) TestBasic(c *C) {
 
 	result, err := client.Get("mem", "table", record.Id)
 	c.Assert(err, IsNil)
-	c.Assert(result.Records, HasLen, 1)
-	c.Assert(result.Records[0].Doc, Equals, record.Doc)
+	c.Assert(result.Doc, Equals, record.Doc)
 
 	err = client.Delete("mem", "table", record.Id)
 	c.Assert(err, IsNil)
@@ -83,13 +82,11 @@ func (this *MainSuite) TestIndex(c *C) {
 
 	result, err := client.Get("mem", "table", record.Id)
 	c.Assert(err, IsNil)
-	c.Assert(result.Records, HasLen, 1)
-	c.Assert(result.Records[0].Doc, Equals, record.Doc)
+	c.Assert(result.Doc, Equals, record.Doc)
 
 	result, err = client.GetBy("mem", "table", "by_name", "Joe")
 	c.Assert(err, IsNil)
-	c.Assert(result.Records, HasLen, 1, Commentf("%v", result))
-	c.Assert(result.Records[0].Doc, Equals, record.Doc)
+	c.Assert(result.Doc, Equals, record.Doc)
 
 	err = client.Delete("mem", "table", record.Id)
 	c.Assert(err, IsNil)
@@ -99,47 +96,66 @@ func (this *MainSuite) TestIndex(c *C) {
 }
 
 func (this *MainSuite) TestQuery(c *C) {
-	// ts := httptest.NewServer(NewServer().Server.Handler)
-	// defer ts.Close()
+	ts := httptest.NewServer(NewServer().Server.Handler)
+	defer ts.Close()
 
-	// record := NewRecord("1", "Value")
-	// record.Keys["by_name"] = []string{"Joe", "Bob"}
+	client := NewClient(ts.URL)
 
-	// client := NewClient(ts.URL, "mem", "table")
+	err := client.PutEnv("mem", "mem", Dictionary{})
+	c.Assert(err, IsNil)
 
-	// err := client.Put(record)
-	// if err != nil {
-	// 	t.Fatalf("PUT failed: %v", err)
-	// }
+	record := NewRecord("1", "1")
+	record.Keys["by_name"] = []string{"Joe", "Bob"}
+	err = client.Put("mem", "table", record)
+	c.Assert(err, IsNil)
 
-	// result, err := client.Get(record.Id)
-	// if err != nil {
-	// 	t.Fatalf("GET failed: %v", err)
-	// }
+	record = NewRecord("2", "2")
+	record.Keys["by_name"] = []string{"Alice", "Carol"}
+	err = client.Put("mem", "table", record)
+	c.Assert(err, IsNil)
 
-	// if string(result) != string(record.Doc) {
-	// 	t.Fatalf("Unexpected result: %q", result)
-	// }
+	record = NewRecord("3", "3")
+	err = client.Put("mem", "table", record)
+	c.Assert(err, IsNil)
 
-	// result, err = client.GetWithIndex("by_name", "Joe")
-	// if err != nil {
-	// 	t.Fatalf("GET failed: %v", err)
-	// }
+	query := NewQueryEQ("_id", "2", 10)
+	result, err := client.Query("mem", "table", query)
+	c.Assert(err, IsNil)
+	c.Assert(result.Records, HasLen, 1, Commentf("%v", result))
+	c.Assert(result.Records[0].Doc, Equals, "2")
 
-	// if string(result) != string(record.Doc) {
-	// 	t.Fatalf("Unexpected result: %q", result)
-	// }
+	query = NewQueryGT("_id", "2", 10)
+	result, err = client.Query("mem", "table", query)
+	c.Assert(err, IsNil)
+	c.Assert(result.Records, HasLen, 1, Commentf("%v", result))
+	c.Assert(result.Records[0].Doc, Equals, "3")
 
-	// err = client.Delete(record.Id)
-	// if err != nil {
-	// 	t.Fatalf("DELETE failed: %v", err)
-	// }
+	query = NewQueryGTE("_id", "2", 10)
+	result, err = client.Query("mem", "table", query)
+	c.Assert(err, IsNil)
+	c.Assert(result.Records, HasLen, 2, Commentf("%v", result))
+	c.Assert(result.Records[0].Doc, Equals, "2")
+	c.Assert(result.Records[1].Doc, Equals, "3")
 
-	// result, err = client.Get(record.Id)
-	// if err == nil {
-	// 	t.Fatalf("GET after DELETE should fail")
-	// }
-	// if err.Error() != "Record not found" {
-	// 	t.Fatalf("GET after DELETE unexpected err: %v", err)
-	// }
+	query = NewQueryLT("_id", "2", 10)
+	result, err = client.Query("mem", "table", query)
+	c.Assert(err, IsNil)
+	c.Assert(result.Records, HasLen, 1, Commentf("%v", result))
+	c.Assert(result.Records[0].Doc, Equals, "1")
+
+	query = NewQueryLTE("_id", "2", 10)
+	result, err = client.Query("mem", "table", query)
+	c.Assert(err, IsNil)
+	c.Assert(result.Records, HasLen, 2, Commentf("%v", result))
+	c.Assert(result.Records[0].Doc, Equals, "1")
+	c.Assert(result.Records[1].Doc, Equals, "2")
+
+	lower := &Bound{true, "1"}
+	upper := &Bound{true, "2"}
+	query = NewQuery("_id", lower, upper, 10)
+	result, err = client.Query("mem", "table", query)
+	c.Assert(err, IsNil)
+	c.Assert(result.Records, HasLen, 2, Commentf("%v", result))
+	c.Assert(result.Records[0].Doc, Equals, "1")
+	c.Assert(result.Records[1].Doc, Equals, "2")
 }
