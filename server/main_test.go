@@ -1,8 +1,7 @@
 package main
 
 import (
-	"github.com/flaub/kissdif"
-	"github.com/flaub/kissdif/driver"
+	. "github.com/flaub/kissdif"
 	"io/ioutil"
 	. "launchpad.net/gocheck"
 	"net/http"
@@ -19,8 +18,8 @@ func init() {
 	Suite(&MainSuite{})
 }
 
-func NewRecord(id, doc string) *driver.Record {
-	return &driver.Record{
+func NewRecord(id, doc string) *Record {
+	return &Record{
 		Id:   id,
 		Doc:  doc,
 		Keys: make(map[string][]string),
@@ -48,8 +47,8 @@ func (this *MainSuite) TestBasic(c *C) {
 
 	record := NewRecord("1", "Value")
 
-	client := kissdif.NewClient(ts.URL)
-	err := client.PutEnv("mem", "mem", driver.Dictionary{})
+	client := NewClient(ts.URL)
+	err := client.PutEnv("mem", "mem", Dictionary{})
 	c.Assert(err, IsNil)
 
 	err = client.Put("mem", "table", record)
@@ -74,9 +73,9 @@ func (this *MainSuite) TestIndex(c *C) {
 	record := NewRecord("1", "Value")
 	record.Keys["by_name"] = []string{"Joe", "Bob"}
 
-	client := kissdif.NewClient(ts.URL)
+	client := NewClient(ts.URL)
 
-	err := client.PutEnv("mem", "mem", driver.Dictionary{})
+	err := client.PutEnv("mem", "mem", Dictionary{})
 	c.Assert(err, IsNil)
 
 	err = client.Put("mem", "table", record)

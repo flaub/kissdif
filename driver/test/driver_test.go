@@ -1,6 +1,7 @@
-package kissdif
+package test
 
 import (
+	. "github.com/flaub/kissdif"
 	. "github.com/flaub/kissdif/driver"
 	_ "github.com/flaub/kissdif/driver/mem"
 	_ "github.com/flaub/kissdif/driver/sql"

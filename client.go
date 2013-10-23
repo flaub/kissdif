@@ -4,41 +4,11 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-	"github.com/flaub/kissdif/driver"
 	"io/ioutil"
 	"net/http"
 	"net/url"
 	"strconv"
 )
-
-type ResultSet struct {
-	IsTruncated bool
-	Records     []*driver.Record
-}
-
-func (this *ResultSet) String() string {
-
-	theLen := len(this.Records)
-	if theLen == 0 {
-		return fmt.Sprintf("0 records")
-	}
-	ret := fmt.Sprintf("%d records: [", theLen)
-	ret += fmt.Sprintf("%v", this.Records[0].Id)
-	for _, record := range this.Records[1:] {
-		ret += fmt.Sprintf(", %v", record.Id)
-	}
-	if this.IsTruncated {
-		ret += ", ..."
-	}
-	ret += "]"
-	return ret
-}
-
-type EnvJson struct {
-	Name   string            `json:"_name"`
-	Driver string            `json:"_driver"`
-	Config map[string]string `json:"_config"`
-}
 
 type Client struct {
 	baseUrl string
@@ -50,7 +20,7 @@ func NewClient(baseUrl string) *Client {
 	}
 }
 
-func (this *Client) Query(query *driver.Query) (*ResultSet, error) {
+func (this *Client) Query(query *Query) (*ResultSet, error) {
 	args := url.Values{}
 	// args.Add("eq", key)
 	if query.Limit != 0 {
@@ -59,7 +29,7 @@ func (this *Client) Query(query *driver.Query) (*ResultSet, error) {
 	return nil, nil
 }
 
-func (this *Client) PutEnv(name, driver string, config driver.Dictionary) error {
+func (this *Client) PutEnv(name, driver string, config Dictionary) error {
 	url := fmt.Sprintf("%s/%s", this.baseUrl, name)
 	envJson := &EnvJson{
 		Name:   name,
@@ -114,7 +84,7 @@ func (this *Client) GetBy(env, table, index, key string) (*ResultSet, error) {
 	return &result, nil
 }
 
-func (this *Client) Put(env, table string, record *driver.Record) error {
+func (this *Client) Put(env, table string, record *Record) error {
 	var buf bytes.Buffer
 	err := json.NewEncoder(&buf).Encode(record)
 	if err != nil {

@@ -3,7 +3,7 @@ package main
 import (
 	"encoding/json"
 	"fmt"
-	"github.com/flaub/kissdif"
+	. "github.com/flaub/kissdif"
 	"github.com/flaub/kissdif/driver"
 	_ "github.com/flaub/kissdif/driver/mem"
 	_ "github.com/flaub/kissdif/driver/sql"
@@ -49,7 +49,7 @@ func NewServer() *Server {
 	return this
 }
 
-func (this *Server) sendError(resp http.ResponseWriter, err *driver.Error) {
+func (this *Server) sendError(resp http.ResponseWriter, err *Error) {
 	resp.Header().Set("Content-Type", "application/json")
 	resp.WriteHeader(err.Status)
 	resp.Write([]byte(err.Error()))
@@ -60,12 +60,12 @@ func (this *Server) sendJson(resp http.ResponseWriter, data interface{}) {
 	json.NewEncoder(resp).Encode(data)
 }
 
-func (this *Server) findEnv(name string) (driver.Environment, *driver.Error) {
+func (this *Server) findEnv(name string) (driver.Environment, *Error) {
 	this.mutex.RLock()
 	defer this.mutex.RUnlock()
 	env, ok := this.envs[name]
 	if !ok {
-		return nil, driver.NewError(http.StatusNotFound, "Environment not found")
+		return nil, NewError(http.StatusNotFound, "Environment not found")
 	}
 	return env, nil
 }
@@ -77,10 +77,10 @@ func (this *Server) putEnv(resp http.ResponseWriter, req *http.Request) {
 	vars := mux.Vars(req)
 	name := vars["env"]
 
-	var envJson kissdif.EnvJson
+	var envJson EnvJson
 	err := json.NewDecoder(req.Body).Decode(&envJson)
 	if err != nil {
-		this.sendError(resp, driver.NewError(http.StatusBadRequest, err.Error()))
+		this.sendError(resp, NewError(http.StatusBadRequest, err.Error()))
 		return
 	}
 	db, err2 := driver.Open(envJson.Driver)
@@ -101,7 +101,7 @@ func (this *Server) putEnv(resp http.ResponseWriter, req *http.Request) {
 func (this *Server) putRecord(resp http.ResponseWriter, req *http.Request) {
 	contentType := req.Header.Get("Content-Type")
 	if contentType != "application/json" {
-		err := driver.NewError(http.StatusBadRequest, fmt.Sprintf("Invalid content type: %v", contentType))
+		err := NewError(http.StatusBadRequest, fmt.Sprintf("Invalid content type: %v", contentType))
 		this.sendError(resp, err)
 		return
 	}
@@ -116,15 +116,15 @@ func (this *Server) putRecord(resp http.ResponseWriter, req *http.Request) {
 		this.sendError(resp, err)
 		return
 	}
-	var record driver.Record
+	var record Record
 	err2 := json.NewDecoder(req.Body).Decode(&record)
 	if err2 != nil {
-		this.sendError(resp, driver.NewError(http.StatusBadRequest, err2.Error()))
+		this.sendError(resp, NewError(http.StatusBadRequest, err2.Error()))
 		return
 	}
 	id := vars["id"]
 	if record.Id != id {
-		this.sendError(resp, driver.NewError(http.StatusBadRequest, "ID Mismatch"))
+		this.sendError(resp, NewError(http.StatusBadRequest, "ID Mismatch"))
 		return
 	}
 	_, err = table.Put(&record)
@@ -134,77 +134,77 @@ func (this *Server) putRecord(resp http.ResponseWriter, req *http.Request) {
 	}
 }
 
-func getLimit(args url.Values) (int, *driver.Error) {
+func getLimit(args url.Values) (int, *Error) {
 	var limit int = 1000
 	strLimit := args.Get("limit")
 	if strLimit != "" {
 		var err error
 		limit, err = strconv.Atoi(strLimit)
 		if err != nil {
-			return 0, driver.NewError(http.StatusBadRequest, err.Error())
+			return 0, NewError(http.StatusBadRequest, err.Error())
 		}
 	}
 	return limit, nil
 }
 
-func getBounds(args url.Values) (lower, upper *driver.Bound, err *driver.Error) {
+func getBounds(args url.Values) (lower, upper *Bound, err *Error) {
 	for k, v := range args {
 		switch k {
 		case "eq":
 			if lower != nil || upper != nil {
-				err = driver.NewError(http.StatusBadGateway, "Invalid query")
+				err = NewError(http.StatusBadGateway, "Invalid query")
 				return
 			}
 			if len(v) != 1 {
-				err = driver.NewError(http.StatusBadGateway, "Invalid query")
+				err = NewError(http.StatusBadGateway, "Invalid query")
 				return
 			}
-			lower = &driver.Bound{true, v[0]}
-			upper = &driver.Bound{true, v[0]}
+			lower = &Bound{true, v[0]}
+			upper = &Bound{true, v[0]}
 			break
 		case "lt":
 			if upper != nil {
-				err = driver.NewError(http.StatusBadGateway, "Invalid query")
+				err = NewError(http.StatusBadGateway, "Invalid query")
 				return
 			}
 			if len(v) != 1 {
-				err = driver.NewError(http.StatusBadGateway, "Invalid query")
+				err = NewError(http.StatusBadGateway, "Invalid query")
 				return
 			}
-			upper = &driver.Bound{false, v[0]}
+			upper = &Bound{false, v[0]}
 			break
 		case "le":
 			if upper != nil {
-				err = driver.NewError(http.StatusBadGateway, "Invalid query")
+				err = NewError(http.StatusBadGateway, "Invalid query")
 				return
 			}
 			if len(v) != 1 {
-				err = driver.NewError(http.StatusBadGateway, "Invalid query")
+				err = NewError(http.StatusBadGateway, "Invalid query")
 				return
 			}
-			upper = &driver.Bound{true, v[0]}
+			upper = &Bound{true, v[0]}
 			break
 		case "gt":
 			if lower != nil {
-				err = driver.NewError(http.StatusBadGateway, "Invalid query")
+				err = NewError(http.StatusBadGateway, "Invalid query")
 				return
 			}
 			if len(v) != 1 {
-				err = driver.NewError(http.StatusBadGateway, "Invalid query")
+				err = NewError(http.StatusBadGateway, "Invalid query")
 				return
 			}
-			lower = &driver.Bound{false, v[0]}
+			lower = &Bound{false, v[0]}
 			break
 		case "ge":
 			if lower != nil {
-				err = driver.NewError(http.StatusBadGateway, "Invalid query")
+				err = NewError(http.StatusBadGateway, "Invalid query")
 				return
 			}
 			if len(v) != 1 {
-				err = driver.NewError(http.StatusBadGateway, "Invalid query")
+				err = NewError(http.StatusBadGateway, "Invalid query")
 				return
 			}
-			lower = &driver.Bound{true, v[0]}
+			lower = &Bound{true, v[0]}
 			break
 		}
 	}
@@ -231,8 +231,8 @@ func (this *Server) getRecord(resp http.ResponseWriter, req *http.Request) {
 	}
 	// lower, upper, err := getBounds(args)
 	key := vars["key"]
-	bound := &driver.Bound{true, key}
-	query := &driver.Query{
+	bound := &Bound{true, key}
+	query := &Query{
 		Index: vars["index"],
 		Limit: limit,
 		Lower: bound,
@@ -243,9 +243,9 @@ func (this *Server) getRecord(resp http.ResponseWriter, req *http.Request) {
 		this.sendError(resp, err)
 		return
 	}
-	result := kissdif.ResultSet{
+	result := ResultSet{
 		IsTruncated: true,
-		Records:     []*driver.Record{},
+		Records:     []*Record{},
 	}
 	for record := range ch {
 		if record == nil {
@@ -255,7 +255,7 @@ func (this *Server) getRecord(resp http.ResponseWriter, req *http.Request) {
 		}
 	}
 	if len(result.Records) == 0 {
-		this.sendError(resp, driver.NewError(http.StatusNotFound, "Record not found"))
+		this.sendError(resp, NewError(http.StatusNotFound, "Record not found"))
 		return
 	}
 	this.sendJson(resp, result)

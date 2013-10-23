@@ -6,6 +6,7 @@ import (
 	"crypto/sha1"
 	"fmt"
 	"github.com/cznic/b"
+	. "github.com/flaub/kissdif"
 	"github.com/flaub/kissdif/driver"
 	"io"
 	"net/http"
@@ -17,7 +18,7 @@ type Driver struct {
 
 type Environment struct {
 	name   string
-	config driver.Dictionary
+	config Dictionary
 	tables map[string]*Table
 	mutex  sync.RWMutex
 }
@@ -34,7 +35,7 @@ type Table struct {
 }
 
 type recordById struct {
-	records map[string]*driver.Record
+	records map[string]*Record
 }
 
 type sentinel struct {
@@ -54,7 +55,7 @@ func NewDriver() *Driver {
 	return new(Driver)
 }
 
-func (this *Driver) Configure(name string, config driver.Dictionary) (driver.Environment, *driver.Error) {
+func (this *Driver) Configure(name string, config Dictionary) (driver.Environment, *Error) {
 	env := &Environment{
 		name:   name,
 		config: config,
@@ -71,11 +72,11 @@ func (this *Environment) Driver() string {
 	return "mem"
 }
 
-func (this *Environment) Config() driver.Dictionary {
+func (this *Environment) Config() Dictionary {
 	return this.config
 }
 
-func (this *Environment) GetTable(name string, create bool) (driver.Table, *driver.Error) {
+func (this *Environment) GetTable(name string, create bool) (driver.Table, *Error) {
 	if create {
 		this.mutex.Lock()
 		defer this.mutex.Unlock()
@@ -86,7 +87,7 @@ func (this *Environment) GetTable(name string, create bool) (driver.Table, *driv
 	table, ok := this.tables[name]
 	if !ok {
 		if !create {
-			return nil, driver.NewError(http.StatusNotFound, "Table not found")
+			return nil, NewError(http.StatusNotFound, "Table not found")
 		}
 		// fmt.Printf("Creating new table: %v\n", name)
 		table = NewTable(name)
@@ -115,19 +116,19 @@ func newIndex(name string) *Index {
 	}
 }
 
-func (this *Table) Put(newRecord *driver.Record) (string, *driver.Error) {
+func (this *Table) Put(newRecord *Record) (string, *Error) {
 	this.mutex.Lock()
 	defer this.mutex.Unlock()
 	h := sha1.New()
 	io.WriteString(h, newRecord.Doc)
 	rev := fmt.Sprintf("%x", h.Sum(nil))
 	primary := this.getIndex("_id")
-	var record *driver.Record
+	var record *Record
 	value, ok := primary.tree.Get(newRecord.Id)
 	if ok {
-		record = value.(*driver.Record)
+		record = value.(*Record)
 		if newRecord.Rev != record.Rev {
-			return "", driver.NewError(http.StatusConflict, "Document update conflict")
+			return "", NewError(http.StatusConflict, "Document update conflict")
 		}
 		this.removeKeys(record)
 		record.Doc = newRecord.Doc
@@ -141,7 +142,7 @@ func (this *Table) Put(newRecord *driver.Record) (string, *driver.Error) {
 	return rev, nil
 }
 
-func (this *Table) Delete(id string) *driver.Error {
+func (this *Table) Delete(id string) *Error {
 	this.mutex.Lock()
 	defer this.mutex.Unlock()
 	primary := this.getIndex("_id")
@@ -149,15 +150,15 @@ func (this *Table) Delete(id string) *driver.Error {
 	if !ok {
 		return nil
 	}
-	record := raw.(*driver.Record)
+	record := raw.(*Record)
 	this.removeKeys(record)
 	primary.tree.Delete(id)
 	return nil
 }
 
-func emit(query *driver.Query, value interface{}, ch chan<- (*driver.Record)) {
+func emit(query *Query, value interface{}, ch chan<- (*Record)) {
 	if query.Index == "_id" {
-		ch <- value.(*driver.Record)
+		ch <- value.(*Record)
 	} else {
 		node, ok := value.(*recordById)
 		if !ok {
@@ -170,18 +171,18 @@ func emit(query *driver.Query, value interface{}, ch chan<- (*driver.Record)) {
 	}
 }
 
-func (this *Table) Get(query *driver.Query) (chan (*driver.Record), *driver.Error) {
+func (this *Table) Get(query *Query) (chan (*Record), *Error) {
 	if query.Index == "" {
-		return nil, driver.NewError(http.StatusBadRequest, "Invalid index")
+		return nil, NewError(http.StatusBadRequest, "Invalid index")
 	}
 	if query.Limit == 0 {
-		return nil, driver.NewError(http.StatusBadRequest, "Invalid limit")
+		return nil, NewError(http.StatusBadRequest, "Invalid limit")
 	}
 	this.mutex.RLock()
 	index := this.getIndex(query.Index)
 	if index == nil {
 		this.mutex.RUnlock()
-		return nil, driver.NewError(http.StatusNotFound, "Index not found")
+		return nil, NewError(http.StatusNotFound, "Index not found")
 	}
 	var cur *b.Enumerator
 	var hit bool
@@ -192,10 +193,10 @@ func (this *Table) Get(query *driver.Query) (chan (*driver.Record), *driver.Erro
 	}
 	// if cur == nil {
 	// 	this.mutex.RUnlock()
-	// 	return nil, driver.NewError(http.StatusNotFound, "No records found")
+	// 	return nil, NewError(http.StatusNotFound, "No records found")
 	// }
 	end := index.findEnd(query.Upper)
-	ch := make(chan (*driver.Record))
+	ch := make(chan (*Record))
 	go func() {
 		// fmt.Printf("Query: (%v, %v)\n", query.Lower, query.Upper)
 		defer this.mutex.RUnlock()
@@ -237,7 +238,7 @@ func (this *Table) getIndex(name string) *Index {
 	return index
 }
 
-func (this *Index) findEnd(upper *driver.Bound) *sentinel {
+func (this *Index) findEnd(upper *Bound) *sentinel {
 	if upper == nil {
 		return nil
 	}
@@ -256,7 +257,7 @@ func (this *Index) findEnd(upper *driver.Bound) *sentinel {
 	}
 }
 
-func (this *Index) add(key string, record *driver.Record) {
+func (this *Index) add(key string, record *Record) {
 	// fmt.Printf("addRecord: (%v, %v)\n", tree, key)
 	var node *recordById
 	raw, ok := this.tree.Get(key)
@@ -266,13 +267,13 @@ func (this *Index) add(key string, record *driver.Record) {
 			panic("Downcast to recordById failed")
 		}
 	} else {
-		node = &recordById{make(map[string]*driver.Record)}
+		node = &recordById{make(map[string]*Record)}
 		this.tree.Set(key, node)
 	}
 	node.records[record.Id] = record
 }
 
-func (this *Index) remove(key string, record *driver.Record) {
+func (this *Index) remove(key string, record *Record) {
 	var node *recordById
 	raw, ok := this.tree.Get(key)
 	if !ok {
@@ -290,7 +291,7 @@ func (this *Index) remove(key string, record *driver.Record) {
 	}
 }
 
-func (this *Table) removeKeys(record *driver.Record) {
+func (this *Table) removeKeys(record *Record) {
 	for name, keys := range record.Keys {
 		// fmt.Printf("removeKeys: %v, %v\n", name, keys)
 		index := this.keys[name]
@@ -300,7 +301,7 @@ func (this *Table) removeKeys(record *driver.Record) {
 	}
 }
 
-func (this *Table) addKeys(record *driver.Record) {
+func (this *Table) addKeys(record *Record) {
 	for name, keys := range record.Keys {
 		// fmt.Printf("addKeys: (%v, %v)\n", name, keys)
 		index, ok := this.keys[name]
