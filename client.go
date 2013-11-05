@@ -71,7 +71,7 @@ func (this *Client) GetBy(env, table, index, key string) (*Record, error) {
 func (this *Client) Query(env, table string, query *Query) (*ResultSet, error) {
 	args := make(url.Values)
 	if query.Limit != 0 {
-		args.Set("limit", strconv.Itoa(query.Limit))
+		args.Set("limit", strconv.Itoa(int(query.Limit)))
 	}
 	if query.Lower != nil && query.Upper != nil &&
 		query.Lower.Value == query.Upper.Value {

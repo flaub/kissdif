@@ -129,11 +129,12 @@ func (this *Server) putRecord(resp http.ResponseWriter, req *http.Request) {
 		this.sendError(resp, NewError(http.StatusBadRequest, "ID Mismatch"))
 		return
 	}
-	_, err = table.Put(&record)
+	result, err = table.Put(&record)
 	if err != nil {
 		this.sendError(resp, err)
 		return
 	}
+	this.sendJson(resp, result)
 }
 
 func (this *Server) doQuery(resp http.ResponseWriter, req *http.Request) {
@@ -233,17 +234,17 @@ func (this *Server) processQuery(table driver.Table, query *Query) (*ResultSet, 
 	return result, nil
 }
 
-func getLimit(args url.Values) (int, *Error) {
-	var limit int = 1000
+func getLimit(args url.Values) (uint, *Error) {
+	var limit uint64 = 1000
 	strLimit := args.Get("limit")
 	if strLimit != "" {
 		var err error
-		limit, err = strconv.Atoi(strLimit)
+		limit, err = strconv.ParseUint(strLimit, 10, 32)
 		if err != nil {
 			return 0, NewError(http.StatusBadRequest, err.Error())
 		}
 	}
-	return limit, nil
+	return uint(limit), nil
 }
 
 func getBounds(args url.Values) (lower, upper *Bound, err *Error) {

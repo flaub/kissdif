@@ -1,6 +1,8 @@
 package kissdif
 
 import (
+	"bytes"
+	"encoding/json"
 	"fmt"
 )
 
@@ -26,7 +28,7 @@ type Query struct {
 	Index string
 	Lower *Bound
 	Upper *Bound
-	Limit int
+	Limit uint
 }
 
 type IndexMap map[string][]string
@@ -43,36 +45,58 @@ type Error struct {
 	Message string
 }
 
-func NewQuery(index string, lower, upper *Bound, limit int) *Query {
+func NewRecord(id, rev string, doc interface{}) (*Record, error) {
+	var buf bytes.Buffer
+	err := json.NewEncoder(&buf).Encode(doc)
+	if err != nil {
+		return nil, err
+	}
+	return &Record{
+		Id:   id,
+		Rev:  rev,
+		Doc:  buf.String(),
+		Keys: make(IndexMap),
+	}, nil
+}
+
+func (this *Record) AddKey(name, value string) {
+	index, ok := this.Keys[name]
+	if !ok {
+		index = []string{}
+	}
+	this.Keys[name] = append(index, value)
+}
+
+func NewQuery(index string, lower, upper *Bound, limit uint) *Query {
 	return &Query{index, lower, upper, limit}
 }
 
-func NewQueryEQ(index, key string, limit int) *Query {
+func NewQueryEQ(index, key string, limit uint) *Query {
 	bound := &Bound{true, key}
 	return &Query{index, bound, bound, limit}
 }
 
-func NewQueryGT(index, key string, limit int) *Query {
+func NewQueryGT(index, key string, limit uint) *Query {
 	bound := &Bound{false, key}
 	return &Query{index, bound, nil, limit}
 }
 
-func NewQueryGTE(index, key string, limit int) *Query {
+func NewQueryGTE(index, key string, limit uint) *Query {
 	bound := &Bound{true, key}
 	return &Query{index, bound, nil, limit}
 }
 
-func NewQueryLT(index, key string, limit int) *Query {
+func NewQueryLT(index, key string, limit uint) *Query {
 	bound := &Bound{false, key}
 	return &Query{index, nil, bound, limit}
 }
 
-func NewQueryLTE(index, key string, limit int) *Query {
+func NewQueryLTE(index, key string, limit uint) *Query {
 	bound := &Bound{true, key}
 	return &Query{index, nil, bound, limit}
 }
 
-func NewQueryRange(index, lower, upper string, limit int) *Query {
+func NewQueryRange(index, lower, upper string, limit uint) *Query {
 	lb := &Bound{true, lower}
 	ub := &Bound{true, upper}
 	return &Query{index, lb, ub, limit}

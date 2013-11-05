@@ -116,19 +116,19 @@ func newIndex(name string) *Index {
 	}
 }
 
-func (this *Table) Put(newRecord *Record) (string, *Error) {
+func (this *Table) Put(newRecord *Record) (*Record, *Error) {
 	this.mutex.Lock()
 	defer this.mutex.Unlock()
-	h := sha1.New()
-	io.WriteString(h, newRecord.Doc)
-	rev := fmt.Sprintf("%x", h.Sum(nil))
+	hasher := sha1.New()
+	io.WriteString(hasher, newRecord.Doc)
+	rev := fmt.Sprintf("%x", hasher.Sum(nil))
 	primary := this.getIndex("_id")
 	var record *Record
 	value, ok := primary.tree.Get(newRecord.Id)
 	if ok {
 		record = value.(*Record)
 		if newRecord.Rev != record.Rev {
-			return "", NewError(http.StatusConflict, "Document update conflict")
+			return nil, NewError(http.StatusConflict, "Document update conflict")
 		}
 		this.removeKeys(record)
 		record.Doc = newRecord.Doc
@@ -139,7 +139,7 @@ func (this *Table) Put(newRecord *Record) (string, *Error) {
 	}
 	record.Rev = rev
 	this.addKeys(record)
-	return rev, nil
+	return record, nil
 }
 
 func (this *Table) Delete(id string) *Error {
@@ -205,7 +205,7 @@ func (this *Table) Get(query *Query) (chan (*Record), *Error) {
 			ch <- nil
 			return
 		}
-		count := 0
+		var count uint = 0
 		for {
 			key, value, err := cur.Next()
 			// fmt.Printf("Enumerating: [%d] %v %v\n", i, key, err)

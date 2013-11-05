@@ -43,6 +43,6 @@ type Environment interface {
 
 type Table interface {
 	Get(query *Query) (chan (*Record), *Error)
-	Put(record *Record) (rev string, err *Error)
+	Put(record *Record) (*Record, *Error)
 	Delete(id string) *Error
 }

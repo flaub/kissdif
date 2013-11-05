@@ -232,7 +232,7 @@ func (this *Table) Get(query *Query) (chan (*Record), *Error) {
 		defer db.Close()
 		defer rows.Close()
 		defer close(ch)
-		count := 0
+		var count uint
 		for rows.Next() {
 			var record Record
 			err := rows.Scan(&record.Id, &record.Rev, &record.Doc)
@@ -251,24 +251,24 @@ func (this *Table) Get(query *Query) (chan (*Record), *Error) {
 	return ch, nil
 }
 
-func (this *Table) Put(record *Record) (string, *Error) {
+func (this *Table) Put(record *Record) (*Record, *Error) {
 	db, err := sql.Open("sqlite3", this.env.config["dsn"])
 	if err != nil {
-		return "", NewError(http.StatusInternalServerError, err.Error())
+		return nil, NewError(http.StatusInternalServerError, err.Error())
 	}
 	defer db.Close()
-	h := sha1.New()
-	io.WriteString(h, record.Doc)
-	rev := fmt.Sprintf("%x", h.Sum(nil))
+	hasher := sha1.New()
+	io.WriteString(hasher, record.Doc)
+	rev := fmt.Sprintf("%x", hasher.Sum(nil))
 	tx, err := db.Begin()
 	if err != nil {
-		return "", NewError(http.StatusInternalServerError, err.Error())
+		return nil, NewError(http.StatusInternalServerError, err.Error())
 	}
 	if record.Rev == "" {
 		_, err = tx.Exec(compile(sqlRecordInsert, this.name, ""), record.Id, rev, record.Doc)
 		if err != nil {
 			tx.Rollback()
-			return "", NewError(http.StatusConflict, err.Error())
+			return nil, NewError(http.StatusConflict, err.Error())
 		}
 	} else {
 		result, err := tx.Exec(compile(sqlRecordUpdate, this.name, ""),
@@ -276,25 +276,26 @@ func (this *Table) Put(record *Record) (string, *Error) {
 		rows, err := result.RowsAffected()
 		if err != nil || rows != 1 {
 			tx.Rollback()
-			return "", NewError(http.StatusConflict, "Document update conflict")
+			return nil, NewError(http.StatusConflict, "Document update conflict")
 		}
 	}
 	_, err = tx.Exec(compile(sqlIndexDelete, this.name, ""), record.Id)
 	if err != nil {
 		tx.Rollback()
-		return "", NewError(http.StatusInternalServerError, err.Error())
+		return nil, NewError(http.StatusInternalServerError, err.Error())
 	}
 	for name, keys := range record.Keys {
 		for _, key := range keys {
 			_, err = tx.Exec(compile(sqlIndexAttach, this.name, ""), record.Id, name, key)
 			if err != nil {
 				tx.Rollback()
-				return "", NewError(http.StatusInternalServerError, err.Error())
+				return nil, NewError(http.StatusInternalServerError, err.Error())
 			}
 		}
 	}
 	tx.Commit()
-	return rev, nil
+	record.Rev = rev
+	return record, nil
 }
 
 func (this *Table) Delete(id string) *Error {

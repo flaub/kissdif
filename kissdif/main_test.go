@@ -18,14 +18,6 @@ func init() {
 	Suite(&MainSuite{})
 }
 
-func NewRecord(id, doc string) *Record {
-	return &Record{
-		Id:   id,
-		Doc:  doc,
-		Keys: make(map[string][]string),
-	}
-}
-
 func (this *MainSuite) TestServer(c *C) {
 	ts := httptest.NewServer(NewServer().Server.Handler)
 	defer ts.Close()
@@ -45,10 +37,11 @@ func (this *MainSuite) TestBasic(c *C) {
 	ts := httptest.NewServer(NewServer().Server.Handler)
 	defer ts.Close()
 
-	record := NewRecord("1", "Value")
+	record, err := NewRecord("1", "", "Value")
+	c.Assert(err, IsNil)
 
 	client := NewClient(ts.URL)
-	err := client.PutEnv("mem", "mem", Dictionary{})
+	err = client.PutEnv("mem", "mem", Dictionary{})
 	c.Assert(err, IsNil)
 
 	err = client.Put("mem", "table", record)
@@ -69,12 +62,13 @@ func (this *MainSuite) TestIndex(c *C) {
 	ts := httptest.NewServer(NewServer().Server.Handler)
 	defer ts.Close()
 
-	record := NewRecord("1", "Value")
+	record, err := NewRecord("1", "", "Value")
+	c.Assert(err, IsNil)
 	record.Keys["by_name"] = []string{"Joe", "Bob"}
 
 	client := NewClient(ts.URL)
 
-	err := client.PutEnv("mem", "mem", Dictionary{})
+	err = client.PutEnv("mem", "mem", Dictionary{})
 	c.Assert(err, IsNil)
 
 	err = client.Put("mem", "table", record)
@@ -104,17 +98,20 @@ func (this *MainSuite) TestQuery(c *C) {
 	err := client.PutEnv("mem", "mem", Dictionary{})
 	c.Assert(err, IsNil)
 
-	record := NewRecord("1", "1")
+	record, err := NewRecord("1", "", "1")
+	c.Assert(err, IsNil)
 	record.Keys["by_name"] = []string{"Joe", "Bob"}
 	err = client.Put("mem", "table", record)
 	c.Assert(err, IsNil)
 
-	record = NewRecord("2", "2")
+	record, err = NewRecord("2", "", "2")
+	c.Assert(err, IsNil)
 	record.Keys["by_name"] = []string{"Alice", "Carol"}
 	err = client.Put("mem", "table", record)
 	c.Assert(err, IsNil)
 
-	record = NewRecord("3", "3")
+	record, err = NewRecord("3", "", "3")
+	c.Assert(err, IsNil)
 	err = client.Put("mem", "table", record)
 	c.Assert(err, IsNil)
 
