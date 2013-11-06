@@ -14,7 +14,7 @@ import (
 
 type TestSuite struct {
 	name   string
-	env    Environment
+	db     Database
 	config Dictionary
 	table  Table
 	c      *C
@@ -102,12 +102,12 @@ func getTemp(c *C) string {
 }
 
 func (this *TestSuite) SetUpTest(c *C) {
-	db, err := Open(this.name)
+	drv, err := Open(this.name)
 	c.Assert(err, IsNil)
-	this.env, err = db.Configure("env", this.config)
+	this.db, err = drv.Configure("db", this.config)
 	c.Assert(err, IsNil)
-	c.Assert(this.env, NotNil)
-	this.table, err = this.env.GetTable("table", true)
+	c.Assert(this.db, NotNil)
+	this.table, err = this.db.GetTable("table", true)
 	c.Assert(err, IsNil)
 	c.Assert(this.table, NotNil)
 }

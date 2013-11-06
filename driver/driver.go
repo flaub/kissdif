@@ -31,10 +31,10 @@ func Open(name string) (Driver, *Error) {
 }
 
 type Driver interface {
-	Configure(name string, config Dictionary) (Environment, *Error)
+	Configure(name string, config Dictionary) (Database, *Error)
 }
 
-type Environment interface {
+type Database interface {
 	Name() string
 	Driver() string
 	Config() Dictionary

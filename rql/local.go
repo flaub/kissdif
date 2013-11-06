@@ -8,23 +8,23 @@ import (
 )
 
 type localConn struct {
-	dbs   map[string]driver.Environment
+	dbs   map[string]driver.Database
 	mutex sync.RWMutex
 }
 
 func newLocalConn() *localConn {
 	return &localConn{
-		dbs: make(map[string]driver.Environment),
+		dbs: make(map[string]driver.Database),
 	}
 }
 
-func (this *localConn) getEnv(name string) driver.Environment {
+func (this *localConn) getDb(name string) driver.Database {
 	this.mutex.RLock()
 	defer this.mutex.RUnlock()
 	return this.dbs[name]
 }
 
-func (this *localConn) putEnv(name string, db driver.Environment) {
+func (this *localConn) putDb(name string, db driver.Database) {
 	this.mutex.Lock()
 	defer this.mutex.Unlock()
 	this.dbs[name] = db
@@ -39,7 +39,7 @@ func (this *localConn) CreateDB(name, driverName string, config kissdif.Dictiona
 	if err != nil {
 		return nil, err
 	}
-	this.putEnv(name, db)
+	this.putDb(name, db)
 	return newQuery(name), nil
 }
 
@@ -48,7 +48,7 @@ func (this *localConn) DropDB(name string) *kissdif.Error {
 }
 
 func (this *localConn) Get(impl *queryImpl) (*kissdif.ResultSet, *kissdif.Error) {
-	db := this.getEnv(impl.db)
+	db := this.getDb(impl.db)
 	if db == nil {
 		return nil, kissdif.NewError(http.StatusNotFound, "DB not found")
 	}
@@ -75,7 +75,7 @@ func (this *localConn) Get(impl *queryImpl) (*kissdif.ResultSet, *kissdif.Error)
 }
 
 func (this *localConn) Put(impl *queryImpl) (string, *kissdif.Error) {
-	db := this.getEnv(impl.db)
+	db := this.getDb(impl.db)
 	if db == nil {
 		return "", kissdif.NewError(http.StatusNotFound, "DB not found")
 	}
@@ -87,7 +87,7 @@ func (this *localConn) Put(impl *queryImpl) (string, *kissdif.Error) {
 }
 
 func (this *localConn) Delete(impl *queryImpl) *kissdif.Error {
-	db := this.getEnv(impl.db)
+	db := this.getDb(impl.db)
 	if db == nil {
 		return kissdif.NewError(http.StatusNotFound, "DB not found")
 	}

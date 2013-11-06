@@ -18,7 +18,7 @@ import (
 type Driver struct {
 }
 
-type Environment struct {
+type Database struct {
 	name   string
 	config Dictionary
 	tables map[string]*Table
@@ -57,28 +57,28 @@ func NewDriver() *Driver {
 	return new(Driver)
 }
 
-func (this *Driver) Configure(name string, config Dictionary) (driver.Environment, *Error) {
-	env := &Environment{
+func (this *Driver) Configure(name string, config Dictionary) (driver.Database, *Error) {
+	db := &Database{
 		name:   name,
 		config: config,
 		tables: make(map[string]*Table),
 	}
-	return env, nil
+	return db, nil
 }
 
-func (this *Environment) Name() string {
+func (this *Database) Name() string {
 	return this.name
 }
 
-func (this *Environment) Driver() string {
+func (this *Database) Driver() string {
 	return "mem"
 }
 
-func (this *Environment) Config() Dictionary {
+func (this *Database) Config() Dictionary {
 	return this.config
 }
 
-func (this *Environment) GetTable(name string, create bool) (driver.Table, *Error) {
+func (this *Database) GetTable(name string, create bool) (driver.Table, *Error) {
 	if create {
 		this.mutex.Lock()
 		defer this.mutex.Unlock()

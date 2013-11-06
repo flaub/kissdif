@@ -11,10 +11,10 @@ type ResultSet struct {
 	Records []*Record
 }
 
-type EnvJson struct {
-	Name   string            `json:"_name"`
-	Driver string            `json:"_driver"`
-	Config map[string]string `json:"_config"`
+type DatabaseCfg struct {
+	Name   string            `json:"name"`
+	Driver string            `json:"driver"`
+	Config map[string]string `json:"config"`
 }
 
 type Bound struct {

@@ -71,7 +71,7 @@ WHERE _id = ? AND _rev = ?
 type Driver struct {
 }
 
-type Environment struct {
+type Database struct {
 	name   string
 	config Dictionary
 	tables map[string]*Table
@@ -80,7 +80,7 @@ type Environment struct {
 
 type Table struct {
 	name string
-	env  *Environment
+	db   *Database
 }
 
 func init() {
@@ -91,28 +91,28 @@ func NewDriver() *Driver {
 	return new(Driver)
 }
 
-func (this *Driver) Configure(name string, config Dictionary) (driver.Environment, *Error) {
-	env := &Environment{
+func (this *Driver) Configure(name string, config Dictionary) (driver.Database, *Error) {
+	db := &Database{
 		name:   name,
 		config: config,
 		tables: make(map[string]*Table),
 	}
-	return env, nil
+	return db, nil
 }
 
-func (this *Environment) Name() string {
+func (this *Database) Name() string {
 	return this.name
 }
 
-func (this *Environment) Driver() string {
+func (this *Database) Driver() string {
 	return "sql"
 }
 
-func (this *Environment) Config() Dictionary {
+func (this *Database) Config() Dictionary {
 	return this.config
 }
 
-func (this *Environment) GetTable(name string, create bool) (driver.Table, *Error) {
+func (this *Database) GetTable(name string, create bool) (driver.Table, *Error) {
 	if create {
 		this.mutex.Lock()
 		defer this.mutex.Unlock()
@@ -136,7 +136,7 @@ func (this *Environment) GetTable(name string, create bool) (driver.Table, *Erro
 	return table, nil
 }
 
-func (this *Environment) NewTable(name string) (*Table, *Error) {
+func (this *Database) NewTable(name string) (*Table, *Error) {
 	db, err := sql.Open("sqlite3", this.config["dsn"])
 	if err != nil {
 		return nil, NewError(http.StatusInternalServerError, err.Error())
@@ -218,7 +218,7 @@ func (this *Table) Get(query *Query) (chan (*Record), *Error) {
 	if query.Limit == 0 {
 		return nil, NewError(http.StatusBadRequest, "Invalid limit")
 	}
-	db, err := sql.Open("sqlite3", this.env.config["dsn"])
+	db, err := sql.Open("sqlite3", this.db.config["dsn"])
 	if err != nil {
 		return nil, NewError(http.StatusInternalServerError, err.Error())
 	}
@@ -269,7 +269,7 @@ func (this *Table) Put(record *Record) (string, *Error) {
 	hasher := sha1.New()
 	io.WriteString(hasher, doc)
 	rev := fmt.Sprintf("%x", hasher.Sum(nil))
-	db, err := sql.Open("sqlite3", this.env.config["dsn"])
+	db, err := sql.Open("sqlite3", this.db.config["dsn"])
 	if err != nil {
 		return "", NewError(http.StatusInternalServerError, err.Error())
 	}
@@ -313,7 +313,7 @@ func (this *Table) Put(record *Record) (string, *Error) {
 }
 
 func (this *Table) Delete(id string) *Error {
-	db, err := sql.Open("sqlite3", this.env.config["dsn"])
+	db, err := sql.Open("sqlite3", this.db.config["dsn"])
 	if err != nil {
 		return NewError(http.StatusInternalServerError, err.Error())
 	}

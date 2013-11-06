@@ -14,7 +14,7 @@ import (
 
 type Server struct {
 	http.Server
-	envs  map[string]driver.Environment
+	dbs   map[string]driver.Database
 	mutex sync.RWMutex
 }
 
@@ -26,18 +26,18 @@ func NewServer() *Server {
 			Addr:    ":8080",
 			Handler: router,
 		},
-		envs: make(map[string]driver.Environment),
+		dbs: make(map[string]driver.Database),
 	}
 
-	router.HandleFunc("/{env}", this.putEnv).
+	router.HandleFunc("/{db}", this.putDb).
 		Methods("PUT")
-	router.HandleFunc("/{env}/{table}/{index}", this.doQuery).
+	router.HandleFunc("/{db}/{table}/{index}", this.doQuery).
 		Methods("GET")
-	router.HandleFunc("/{env}/{table}/{index}/{key:.+}", this.getRecord).
+	router.HandleFunc("/{db}/{table}/{index}/{key:.+}", this.getRecord).
 		Methods("GET")
-	router.HandleFunc("/{env}/{table}/_id/{key:.+}", this.putRecord).
+	router.HandleFunc("/{db}/{table}/_id/{key:.+}", this.putRecord).
 		Methods("PUT")
-	router.HandleFunc("/{env}/{table}/_id/{key:.+}", this.deleteRecord).
+	router.HandleFunc("/{db}/{table}/_id/{key:.+}", this.deleteRecord).
 		Methods("DELETE")
 
 	return this
@@ -54,14 +54,14 @@ func (this *Server) sendJson(resp http.ResponseWriter, data interface{}) {
 	json.NewEncoder(resp).Encode(data)
 }
 
-func (this *Server) findEnv(name string) (driver.Environment, *Error) {
+func (this *Server) findDb(name string) (driver.Database, *Error) {
 	this.mutex.RLock()
 	defer this.mutex.RUnlock()
-	env, ok := this.envs[name]
+	db, ok := this.dbs[name]
 	if !ok {
-		return nil, NewError(http.StatusNotFound, "Environment not found")
+		return nil, NewError(http.StatusNotFound, "Database not found")
 	}
-	return env, nil
+	return db, nil
 }
 
 func (this *Server) getVar(vars map[string]string, name string) (string, *Error) {
@@ -77,11 +77,11 @@ func (this *Server) getVar(vars map[string]string, name string) (string, *Error)
 }
 
 func (this *Server) getTable(vars map[string]string, create bool) (driver.Table, *Error) {
-	envName, kerr := this.getVar(vars, "env")
+	dbName, kerr := this.getVar(vars, "db")
 	if kerr != nil {
 		return nil, kerr
 	}
-	env, kerr := this.findEnv(envName)
+	db, kerr := this.findDb(dbName)
 	if kerr != nil {
 		return nil, kerr
 	}
@@ -89,36 +89,36 @@ func (this *Server) getTable(vars map[string]string, create bool) (driver.Table,
 	if kerr != nil {
 		return nil, kerr
 	}
-	return env.GetTable(tableName, create)
+	return db.GetTable(tableName, create)
 }
 
-func (this *Server) putEnv(resp http.ResponseWriter, req *http.Request) {
-	fmt.Printf("PUT env: %v\n", req.URL)
+func (this *Server) putDb(resp http.ResponseWriter, req *http.Request) {
+	fmt.Printf("PUT db: %v\n", req.URL)
 	vars := mux.Vars(req)
-	envName, kerr := this.getVar(vars, "env")
+	dbName, kerr := this.getVar(vars, "db")
 	if kerr != nil {
 		this.sendError(resp, kerr)
 		return
 	}
-	var envJson EnvJson
-	err := json.NewDecoder(req.Body).Decode(&envJson)
+	var dbcfg DatabaseCfg
+	err := json.NewDecoder(req.Body).Decode(&dbcfg)
 	if err != nil {
 		this.sendError(resp, NewError(http.StatusBadRequest, err.Error()))
 		return
 	}
-	db, kerr := driver.Open(envJson.Driver)
+	drv, kerr := driver.Open(dbcfg.Driver)
 	if kerr != nil {
 		this.sendError(resp, kerr)
 		return
 	}
-	env, kerr := db.Configure(envName, envJson.Config)
+	db, kerr := drv.Configure(dbName, dbcfg.Config)
 	if kerr != nil {
 		this.sendError(resp, kerr)
 		return
 	}
 	this.mutex.Lock()
 	defer this.mutex.Unlock()
-	this.envs[envName] = env
+	this.dbs[dbName] = db
 }
 
 func (this *Server) putRecord(resp http.ResponseWriter, req *http.Request) {

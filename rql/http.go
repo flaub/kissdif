@@ -29,13 +29,13 @@ func (this *httpConn) makeUrl(impl *queryImpl) string {
 
 func (this *httpConn) CreateDB(name, driverName string, config kissdif.Dictionary) (Database, *kissdif.Error) {
 	url := fmt.Sprintf("%s/%s", this.baseUrl, name)
-	envJson := &kissdif.EnvJson{
+	dbcfg := &kissdif.DatabaseCfg{
 		Name:   name,
 		Driver: driverName,
 		Config: config,
 	}
 	var buf bytes.Buffer
-	err := json.NewEncoder(&buf).Encode(envJson)
+	err := json.NewEncoder(&buf).Encode(dbcfg)
 	if err != nil {
 		return nil, kissdif.NewError(http.StatusBadRequest, err.Error())
 	}
