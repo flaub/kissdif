@@ -1,23 +1,24 @@
 package rql
 
 import (
+	_ "fmt"
 	"github.com/flaub/kissdif"
 	"net/http"
 	_url "net/url"
 )
 
 type Conn interface {
-	CreateDB(name, driver string, config kissdif.Dictionary) (IDatabase, *kissdif.Error)
+	CreateDB(name, driver string, config kissdif.Dictionary) (Database, *kissdif.Error)
 	DropDB(name string) *kissdif.Error
 }
 
 type iConn interface {
-	Get(query *queryImpl) (chan (*kissdif.Record), *kissdif.Error)
-	Put(query *queryImpl) (*kissdif.Record, *kissdif.Error)
+	Get(query *queryImpl) (*kissdif.ResultSet, *kissdif.Error)
+	Put(query *queryImpl) (string, *kissdif.Error)
 	Delete(query *queryImpl) *kissdif.Error
 }
 
-type IDatabase interface {
+type Database interface {
 	DropTable(name string) ExecStmt
 	Table(name string) Table
 }
@@ -30,8 +31,13 @@ type SingleStmt interface {
 	Run(conn Conn) (*kissdif.Record, *kissdif.Error)
 }
 
+type PutStmt interface {
+	Run(conn Conn) (string, *kissdif.Error)
+	By(key, value string) PutStmt
+}
+
 type MultiStmt interface {
-	Run(conn Conn) (chan (*kissdif.Record), *kissdif.Error)
+	Run(conn Conn) (*kissdif.ResultSet, *kissdif.Error)
 }
 
 type Bound struct {
@@ -53,13 +59,13 @@ type Query interface {
 
 type Indexable interface {
 	Query
-	Index(index string) Query
+	By(index string) Query
 }
 
 type Table interface {
 	Indexable
-	Insert(id string, doc interface{}) SingleStmt
-	Update(id, rev string, doc interface{}) SingleStmt
+	Insert(id string, doc interface{}) PutStmt
+	Update(id, rev string, doc interface{}) PutStmt
 	Delete(id, rev string) ExecStmt
 }
 
@@ -76,36 +82,45 @@ type deleteStmt struct {
 }
 
 type queryImpl struct {
-	db    string
-	table string
-	query kissdif.Query
-	id    string
-	rev   string
-	doc   interface{}
+	db     string
+	table  string
+	record kissdif.Record
+	query  kissdif.Query
+	doc    interface{}
 }
 
 func Connect(url string) (Conn, *kissdif.Error) {
-	if url == "local" {
-		return newLocalConn(), nil
-	}
 	theUrl, err := _url.Parse(url)
 	if err != nil {
 		return nil, kissdif.NewError(http.StatusBadRequest, err.Error())
 	}
-	if theUrl.Scheme == "http" {
+	switch theUrl.Scheme {
+	case "http":
+		fallthrough
+	case "https":
+		return newHttpConn(url), nil
+	case "local":
+		return newLocalConn(), nil
+	default:
+		return nil, kissdif.NewError(http.StatusBadRequest, "Unrecognized connection scheme")
 	}
-	return nil, kissdif.NewError(http.StatusBadRequest, "Unrecognized connection scheme")
 }
 
-func DB(name string) IDatabase {
+func DB(name string) Database {
 	return newQuery(name)
 }
 
 func newQuery(db string) *queryImpl {
-	this := &queryImpl{db: db}
-	this.query.Index = "_id"
-	this.query.Limit = 1000
-	return this
+	return &queryImpl{
+		db: db,
+		record: kissdif.Record{
+			Keys: make(kissdif.IndexMap),
+		},
+		query: kissdif.Query{
+			Index: "_id",
+			Limit: 1000,
+		},
+	}
 }
 
 func (this *queryImpl) DropTable(name string) ExecStmt {
@@ -123,13 +138,14 @@ func (this *queryImpl) Limit(count uint) Query {
 	return this
 }
 
-func (this *queryImpl) Index(index string) Query {
+func (this *queryImpl) By(index string) Query {
 	this.query.Index = index
 	return this
 }
 
 func (this *queryImpl) Get(key string) SingleStmt {
 	bound := &kissdif.Bound{true, key}
+	this.query.Limit = 1
 	this.query.Lower = bound
 	this.query.Upper = bound
 	return &singleStmt{this}
@@ -148,34 +164,39 @@ func (this *queryImpl) Between(lower, upper string) Limitable {
 	return this
 }
 
-func (this *queryImpl) Insert(id string, doc interface{}) SingleStmt {
-	this.id = id
-	this.doc = doc
+func (this *queryImpl) Insert(id string, doc interface{}) PutStmt {
+	this.record.Id = id
+	this.record.Doc = doc
 	return &putStmt{this}
 }
 
-func (this *queryImpl) Update(id, rev string, doc interface{}) SingleStmt {
-	this.id = id
-	this.rev = rev
-	this.doc = doc
+func (this *queryImpl) Update(id, rev string, doc interface{}) PutStmt {
+	this.record.Id = id
+	this.record.Rev = rev
+	this.record.Doc = doc
 	return &putStmt{this}
 }
 
 func (this *queryImpl) Delete(id, rev string) ExecStmt {
-	this.id = id
-	this.rev = rev
+	this.record.Id = id
+	this.record.Rev = rev
 	return &deleteStmt{this}
 }
 
-func (this *putStmt) Run(conn Conn) (*kissdif.Record, *kissdif.Error) {
+func (this *putStmt) Run(conn Conn) (string, *kissdif.Error) {
 	return conn.(iConn).Put(this.queryImpl)
+}
+
+func (this *putStmt) By(key, value string) PutStmt {
+	this.record.AddKey(key, value)
+	return this
 }
 
 func (this *deleteStmt) Run(conn Conn) *kissdif.Error {
 	return conn.(iConn).Delete(this.queryImpl)
 }
 
-func (this *queryImpl) Run(conn Conn) (chan *kissdif.Record, *kissdif.Error) {
+func (this *queryImpl) Run(conn Conn) (*kissdif.ResultSet, *kissdif.Error) {
 	return conn.(iConn).Get(this)
 }
 
@@ -183,22 +204,16 @@ func (this *singleStmt) Run(conn Conn) (*kissdif.Record, *kissdif.Error) {
 	if conn == nil {
 		return nil, kissdif.NewError(http.StatusBadRequest, "conn must not be null")
 	}
-	ch, err := conn.(iConn).Get(this.queryImpl)
+	resultSet, err := conn.(iConn).Get(this.queryImpl)
 	if err != nil {
 		return nil, err
 	}
-	var result *kissdif.Record
-	for record := range ch {
-		if record != nil {
-			if result != nil {
-				err = kissdif.NewError(http.StatusMultipleChoices, "Multiple records found")
-			} else {
-				result = record
-			}
-		}
+	// fmt.Printf("RS: %v\n", resultSet)
+	if resultSet.More || len(resultSet.Records) > 1 {
+		return nil, kissdif.NewError(http.StatusMultipleChoices, "Multiple records found")
 	}
-	if err != nil {
-		return nil, err
+	if len(resultSet.Records) == 0 {
+		return nil, kissdif.NewError(http.StatusNotFound, "Record not found")
 	}
-	return result, nil
+	return resultSet.Records[0], nil
 }

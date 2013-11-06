@@ -19,7 +19,15 @@ func newHttpConn(url string) *httpConn {
 	return &httpConn{url}
 }
 
-func (this *httpConn) CreateDB(name, driverName string, config kissdif.Dictionary) (IDatabase, *kissdif.Error) {
+func (this *httpConn) makeUrl(impl *queryImpl) string {
+	return fmt.Sprintf("%s/%s/%s/%s",
+		this.baseUrl,
+		url.QueryEscape(impl.db),
+		url.QueryEscape(impl.table),
+		url.QueryEscape(impl.query.Index))
+}
+
+func (this *httpConn) CreateDB(name, driverName string, config kissdif.Dictionary) (Database, *kissdif.Error) {
 	url := fmt.Sprintf("%s/%s", this.baseUrl, name)
 	envJson := &kissdif.EnvJson{
 		Name:   name,
@@ -55,7 +63,7 @@ func (this *httpConn) DropDB(name string) *kissdif.Error {
 	return kissdif.NewError(http.StatusNotImplemented, "Not implemented")
 }
 
-func (this *httpConn) Get(impl *queryImpl) (chan *kissdif.Record, *kissdif.Error) {
+func (this *httpConn) Get(impl *queryImpl) (*kissdif.ResultSet, *kissdif.Error) {
 	args := make(url.Values)
 	if impl.query.Limit != 0 {
 		args.Set("limit", strconv.Itoa(int(impl.query.Limit)))
@@ -79,7 +87,7 @@ func (this *httpConn) Get(impl *queryImpl) (chan *kissdif.Record, *kissdif.Error
 			}
 		}
 	}
-	url := fmt.Sprintf("%s/%s/%s/%s?%s", this.baseUrl, impl.db, impl.table, impl.query.Index, args.Encode())
+	url := this.makeUrl(impl) + "?" + args.Encode()
 	resp, err := http.Get(url)
 	if err != nil {
 		return nil, kissdif.NewError(http.StatusBadRequest, err.Error())
@@ -97,60 +105,43 @@ func (this *httpConn) Get(impl *queryImpl) (chan *kissdif.Record, *kissdif.Error
 	if err != nil {
 		return nil, kissdif.NewError(http.StatusNotAcceptable, err.Error())
 	}
-	ch := make(chan *kissdif.Record)
-	go func() {
-		for _, record := range result.Records {
-			ch <- record
-		}
-		if !result.More {
-			ch <- nil
-		}
-		close(ch)
-	}()
-	return ch, nil
+	return &result, nil
 }
 
-func (this *httpConn) Put(impl *queryImpl) (*kissdif.Record, *kissdif.Error) {
-	var bufDoc bytes.Buffer
-	json.NewEncoder(&bufDoc).Encode(impl.doc)
-	record := &kissdif.Record{
-		Id:  impl.id,
-		Rev: impl.rev,
-		Doc: bufDoc.String(),
-	}
-	var bufRec bytes.Buffer
-	err := json.NewEncoder(&bufRec).Encode(record)
+func (this *httpConn) Put(impl *queryImpl) (string, *kissdif.Error) {
+	var buf bytes.Buffer
+	err := json.NewEncoder(&buf).Encode(impl.record)
 	if err != nil {
-		return nil, kissdif.NewError(http.StatusBadRequest, err.Error())
+		return "", kissdif.NewError(http.StatusBadRequest, err.Error())
 	}
-	url := fmt.Sprintf("%s/%s/%s/_id/%s", this.baseUrl, impl.db, impl.table, record.Id)
-	req, err := http.NewRequest("PUT", url, &bufRec)
+	url := this.makeUrl(impl) + "/" + url.QueryEscape(impl.record.Id)
+	req, err := http.NewRequest("PUT", url, &buf)
 	if err != nil {
-		return nil, kissdif.NewError(http.StatusBadRequest, err.Error())
+		return "", kissdif.NewError(http.StatusBadRequest, err.Error())
 	}
 	req.Header.Set("Content-Type", "application/json")
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
-		return nil, kissdif.NewError(http.StatusBadRequest, err.Error())
+		return "", kissdif.NewError(http.StatusBadRequest, err.Error())
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		result, err := ioutil.ReadAll(resp.Body)
 		if err != nil {
-			return nil, kissdif.NewError(http.StatusBadRequest, err.Error())
+			return "", kissdif.NewError(http.StatusBadRequest, err.Error())
 		}
-		return nil, kissdif.NewError(resp.StatusCode, string(result))
+		return "", kissdif.NewError(resp.StatusCode, string(result))
 	}
-	var result kissdif.Record
-	err = json.NewDecoder(resp.Body).Decode(&result)
+	var rev string
+	err = json.NewDecoder(resp.Body).Decode(&rev)
 	if err != nil {
-		return nil, kissdif.NewError(http.StatusNotAcceptable, err.Error())
+		return "", kissdif.NewError(http.StatusNotAcceptable, err.Error())
 	}
-	return &result, nil
+	return rev, nil
 }
 
 func (this *httpConn) Delete(impl *queryImpl) *kissdif.Error {
-	url := fmt.Sprintf("%s/%s/%s/_id/%s", this.baseUrl, impl.db, impl.table, impl.id)
+	url := this.makeUrl(impl) + "/" + url.QueryEscape(impl.record.Id)
 	req, err := http.NewRequest("DELETE", url, nil)
 	if err != nil {
 		return kissdif.NewError(http.StatusBadRequest, err.Error())

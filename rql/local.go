@@ -1,8 +1,6 @@
 package rql
 
 import (
-	"bytes"
-	"encoding/json"
 	"github.com/flaub/kissdif"
 	"github.com/flaub/kissdif/driver"
 	"net/http"
@@ -32,7 +30,7 @@ func (this *localConn) putEnv(name string, db driver.Environment) {
 	this.dbs[name] = db
 }
 
-func (this *localConn) CreateDB(name, driverName string, config kissdif.Dictionary) (IDatabase, *kissdif.Error) {
+func (this *localConn) CreateDB(name, driverName string, config kissdif.Dictionary) (Database, *kissdif.Error) {
 	drv, err := driver.Open(driverName)
 	if err != nil {
 		return nil, err
@@ -49,45 +47,53 @@ func (this *localConn) DropDB(name string) *kissdif.Error {
 	return kissdif.NewError(http.StatusNotImplemented, "Not implemented")
 }
 
-func (this *localConn) Get(query *queryImpl) (chan (*kissdif.Record), *kissdif.Error) {
-	db := this.getEnv(query.db)
+func (this *localConn) Get(impl *queryImpl) (*kissdif.ResultSet, *kissdif.Error) {
+	db := this.getEnv(impl.db)
 	if db == nil {
 		return nil, kissdif.NewError(http.StatusNotFound, "DB not found")
 	}
-	table, err := db.GetTable(query.table, false)
+	table, err := db.GetTable(impl.table, false)
 	if err != nil {
 		return nil, err
 	}
-	return table.Get(&query.query)
+	ch, err := table.Get(&impl.query)
+	if err != nil {
+		return nil, err
+	}
+	result := &kissdif.ResultSet{
+		More:    true,
+		Records: []*kissdif.Record{},
+	}
+	for record := range ch {
+		if record == nil {
+			result.More = false
+		} else {
+			result.Records = append(result.Records, record)
+		}
+	}
+	return result, nil
 }
 
-func (this *localConn) Put(query *queryImpl) (*kissdif.Record, *kissdif.Error) {
-	db := this.getEnv(query.db)
+func (this *localConn) Put(impl *queryImpl) (string, *kissdif.Error) {
+	db := this.getEnv(impl.db)
 	if db == nil {
-		return nil, kissdif.NewError(http.StatusNotFound, "DB not found")
+		return "", kissdif.NewError(http.StatusNotFound, "DB not found")
 	}
-	table, err := db.GetTable(query.table, true)
+	table, err := db.GetTable(impl.table, true)
 	if err != nil {
-		return nil, err
+		return "", err
 	}
-	var buf bytes.Buffer
-	json.NewEncoder(&buf).Encode(query.doc)
-	record := &kissdif.Record{
-		Id:  query.id,
-		Rev: query.rev,
-		Doc: buf.String(),
-	}
-	return table.Put(record)
+	return table.Put(&impl.record)
 }
 
-func (this *localConn) Delete(query *queryImpl) *kissdif.Error {
-	db := this.getEnv(query.db)
+func (this *localConn) Delete(impl *queryImpl) *kissdif.Error {
+	db := this.getEnv(impl.db)
 	if db == nil {
 		return kissdif.NewError(http.StatusNotFound, "DB not found")
 	}
-	table, err := db.GetTable(query.table, false)
+	table, err := db.GetTable(impl.table, false)
 	if err != nil {
 		return err
 	}
-	return table.Delete(query.id)
+	return table.Delete(impl.record.Id)
 }

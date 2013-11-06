@@ -1,8 +1,6 @@
 package kissdif
 
 import (
-	"bytes"
-	"encoding/json"
 	"fmt"
 )
 
@@ -34,10 +32,10 @@ type Query struct {
 type IndexMap map[string][]string
 
 type Record struct {
-	Id   string   `json:"id"`
-	Rev  string   `json:"rev"`
-	Doc  string   `json:"doc"`
-	Keys IndexMap `json:"keys",omitempty`
+	Id   string      `json:"id"`
+	Rev  string      `json:"rev"`
+	Doc  interface{} `json:"doc"`
+	Keys IndexMap    `json:"keys",omitempty`
 }
 
 type Error struct {
@@ -45,26 +43,22 @@ type Error struct {
 	Message string
 }
 
-func NewRecord(id, rev string, doc interface{}) (*Record, error) {
-	var buf bytes.Buffer
-	err := json.NewEncoder(&buf).Encode(doc)
-	if err != nil {
-		return nil, err
-	}
+func NewRecord(id, rev string, doc interface{}) *Record {
 	return &Record{
 		Id:   id,
 		Rev:  rev,
-		Doc:  buf.String(),
+		Doc:  doc,
 		Keys: make(IndexMap),
-	}, nil
+	}
 }
 
-func (this *Record) AddKey(name, value string) {
+func (this *Record) AddKey(name, value string) *Record {
 	index, ok := this.Keys[name]
 	if !ok {
 		index = []string{}
 	}
 	this.Keys[name] = append(index, value)
+	return this
 }
 
 func NewQuery(index string, lower, upper *Bound, limit uint) *Query {
@@ -74,32 +68,6 @@ func NewQuery(index string, lower, upper *Bound, limit uint) *Query {
 func NewQueryEQ(index, key string, limit uint) *Query {
 	bound := &Bound{true, key}
 	return &Query{index, bound, bound, limit}
-}
-
-func NewQueryGT(index, key string, limit uint) *Query {
-	bound := &Bound{false, key}
-	return &Query{index, bound, nil, limit}
-}
-
-func NewQueryGTE(index, key string, limit uint) *Query {
-	bound := &Bound{true, key}
-	return &Query{index, bound, nil, limit}
-}
-
-func NewQueryLT(index, key string, limit uint) *Query {
-	bound := &Bound{false, key}
-	return &Query{index, nil, bound, limit}
-}
-
-func NewQueryLTE(index, key string, limit uint) *Query {
-	bound := &Bound{true, key}
-	return &Query{index, nil, bound, limit}
-}
-
-func NewQueryRange(index, lower, upper string, limit uint) *Query {
-	lb := &Bound{true, lower}
-	ub := &Bound{true, upper}
-	return &Query{index, lb, ub, limit}
 }
 
 func NewError(status int, message string) *Error {
@@ -115,7 +83,12 @@ func (this *ResultSet) String() string {
 	if theLen == 0 {
 		return fmt.Sprintf("0 records")
 	}
-	ret := fmt.Sprintf("%d records: [", theLen)
+	var ret string
+	if theLen == 1 {
+		ret = fmt.Sprintf("1 record: [")
+	} else {
+		ret = fmt.Sprintf("%d records: [", theLen)
+	}
 	ret += fmt.Sprintf("%v", this.Records[0].Id)
 	for _, record := range this.Records[1:] {
 		ret += fmt.Sprintf(", %v", record.Id)

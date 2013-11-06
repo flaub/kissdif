@@ -5,6 +5,7 @@ import (
 	_ "code.google.com/p/go-sqlite/go1/sqlite3"
 	"crypto/sha1"
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	. "github.com/flaub/kissdif"
 	"github.com/flaub/kissdif/driver"
@@ -235,9 +236,16 @@ func (this *Table) Get(query *Query) (chan (*Record), *Error) {
 		var count uint
 		for rows.Next() {
 			var record Record
-			err := rows.Scan(&record.Id, &record.Rev, &record.Doc)
+			var doc string
+			err := rows.Scan(&record.Id, &record.Rev, &doc)
 			if err != nil {
 				fmt.Printf("Scan failed: %v\n", err)
+				return
+			}
+			buf := bytes.NewBufferString(doc)
+			err = json.NewDecoder(buf).Decode(&record.Doc)
+			if err != nil {
+				fmt.Printf("JSON decode failed: %v\n", err)
 				return
 			}
 			if count == query.Limit {
@@ -251,51 +259,57 @@ func (this *Table) Get(query *Query) (chan (*Record), *Error) {
 	return ch, nil
 }
 
-func (this *Table) Put(record *Record) (*Record, *Error) {
+func (this *Table) Put(record *Record) (string, *Error) {
+	var buf bytes.Buffer
+	err := json.NewEncoder(&buf).Encode(record.Doc)
+	if err != nil {
+		return "", NewError(http.StatusInternalServerError, err.Error())
+	}
+	doc := buf.String()
+	hasher := sha1.New()
+	io.WriteString(hasher, doc)
+	rev := fmt.Sprintf("%x", hasher.Sum(nil))
 	db, err := sql.Open("sqlite3", this.env.config["dsn"])
 	if err != nil {
-		return nil, NewError(http.StatusInternalServerError, err.Error())
+		return "", NewError(http.StatusInternalServerError, err.Error())
 	}
 	defer db.Close()
-	hasher := sha1.New()
-	io.WriteString(hasher, record.Doc)
-	rev := fmt.Sprintf("%x", hasher.Sum(nil))
 	tx, err := db.Begin()
 	if err != nil {
-		return nil, NewError(http.StatusInternalServerError, err.Error())
+		return "", NewError(http.StatusInternalServerError, err.Error())
 	}
 	if record.Rev == "" {
-		_, err = tx.Exec(compile(sqlRecordInsert, this.name, ""), record.Id, rev, record.Doc)
+		_, err = tx.Exec(compile(sqlRecordInsert, this.name, ""), record.Id, rev, doc)
 		if err != nil {
 			tx.Rollback()
-			return nil, NewError(http.StatusConflict, err.Error())
+			return "", NewError(http.StatusConflict, err.Error())
 		}
 	} else {
 		result, err := tx.Exec(compile(sqlRecordUpdate, this.name, ""),
-			rev, record.Doc, record.Id, record.Rev)
+			rev, doc, record.Id, record.Rev)
 		rows, err := result.RowsAffected()
 		if err != nil || rows != 1 {
 			tx.Rollback()
-			return nil, NewError(http.StatusConflict, "Document update conflict")
+			return "", NewError(http.StatusConflict, "Document update conflict")
 		}
 	}
 	_, err = tx.Exec(compile(sqlIndexDelete, this.name, ""), record.Id)
 	if err != nil {
 		tx.Rollback()
-		return nil, NewError(http.StatusInternalServerError, err.Error())
+		return "", NewError(http.StatusInternalServerError, err.Error())
 	}
 	for name, keys := range record.Keys {
 		for _, key := range keys {
 			_, err = tx.Exec(compile(sqlIndexAttach, this.name, ""), record.Id, name, key)
 			if err != nil {
 				tx.Rollback()
-				return nil, NewError(http.StatusInternalServerError, err.Error())
+				return "", NewError(http.StatusInternalServerError, err.Error())
 			}
 		}
 	}
 	tx.Commit()
 	record.Rev = rev
-	return record, nil
+	return rev, nil
 }
 
 func (this *Table) Delete(id string) *Error {

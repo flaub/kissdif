@@ -1,43 +1,190 @@
 package rql
 
 import (
+	"bytes"
+	"encoding/json"
 	"github.com/flaub/kissdif"
 	_ "github.com/flaub/kissdif/driver/mem"
+	"github.com/flaub/kissdif/server"
 	. "launchpad.net/gocheck"
 	"net/http"
+	"net/http/httptest"
+	"reflect"
 	"testing"
 )
 
 // Hook up gocheck into the "go test" runner.
 func Test(t *testing.T) { TestingT(t) }
 
-type TestRqlSuite struct{}
-
-func init() {
-	Suite(&TestRqlSuite{})
+type TestSuite struct {
+	conn Conn
 }
 
-func (this *TestRqlSuite) TestBasic(c *C) {
-	_, err := DB("db").Table("table").Get("1").Run(nil)
-	c.Assert(err.Status, Equals, http.StatusBadRequest)
-	c.Assert(err, ErrorMatches, "conn must not be null")
+type TestHttpSuite struct {
+	TestSuite
+	ts *httptest.Server
+}
 
-	conn, err := Connect("local")
-	c.Assert(err, IsNil)
+type TestLocalSuite struct {
+	TestSuite
+}
 
-	db, err := conn.CreateDB("db", "mem", kissdif.Dictionary{})
-	c.Assert(err, IsNil)
+func init() {
+	Suite(&TestHttpSuite{})
+	Suite(&TestLocalSuite{})
+}
 
-	_, err = db.Table("table").Run(conn)
-	c.Assert(err, ErrorMatches, "Table not found")
+func (this *TestHttpSuite) SetUpTest(c *C) {
+	this.ts = httptest.NewServer(server.NewServer().Server.Handler)
+	var kerr *kissdif.Error
+	this.conn, kerr = Connect(this.ts.URL)
+	c.Assert(kerr, IsNil)
+}
 
-	data := struct{ Value string }{Value: "foo"}
-	result, err := db.Table("table").Insert("/", data).Run(conn)
-	c.Assert(err, IsNil)
-	c.Assert(result, NotNil)
-	c.Assert(result.Rev, Not(Equals), "")
+func (this *TestHttpSuite) TearDownTest(c *C) {
+	this.ts.Close()
+}
 
-	result, err = db.Table("table").Get("/").Run(conn)
-	c.Assert(err, IsNil)
-	c.Assert(result.Id, Equals, "/")
+func (this *TestLocalSuite) SetUpTest(c *C) {
+	var kerr *kissdif.Error
+	this.conn, kerr = Connect("local://")
+	c.Assert(kerr, IsNil)
+}
+
+type similarChecker struct {
+	*CheckerInfo
+}
+
+var Similar Checker = &similarChecker{
+	&CheckerInfo{Name: "Similar", Params: []string{"obtained", "expected"}},
+}
+
+func (this *similarChecker) Check(params []interface{}, names []string) (bool, string) {
+	typ := reflect.TypeOf(params[1])
+	value := reflect.New(typ)
+	err := Convert(params[0], value.Interface())
+	if err != nil {
+		return false, err.Error()
+	}
+	other := reflect.Indirect(value).Interface()
+	return reflect.DeepEqual(other, params[1]), ""
+}
+
+func Convert(src, dst interface{}) error {
+	var buf bytes.Buffer
+	err := json.NewEncoder(&buf).Encode(src)
+	if err != nil {
+		return err
+	}
+	return json.NewDecoder(&buf).Decode(dst)
+}
+
+type testDoc struct {
+	Value string
+}
+
+func (this *TestSuite) TestBasic(c *C) {
+	_, kerr := DB("db").Table("table").Get("1").Run(nil)
+	c.Assert(kerr.Status, Equals, http.StatusBadRequest)
+	c.Assert(kerr, ErrorMatches, "conn must not be null")
+
+	db, kerr := this.conn.CreateDB("db", "mem", kissdif.Dictionary{})
+	c.Assert(db, NotNil)
+	c.Assert(kerr, IsNil)
+
+	_, kerr = DB("db").Table("table").Run(this.conn)
+	c.Assert(kerr.Status, Equals, http.StatusNotFound)
+	c.Assert(kerr, ErrorMatches, "Table not found")
+
+	data := testDoc{"foo"}
+	rev, kerr := DB("db").Table("table").Insert("$", data).Run(this.conn)
+	c.Assert(kerr, IsNil)
+	c.Assert(rev, Not(Equals), "")
+
+	result, kerr := DB("db").Table("table").Get("$").Run(this.conn)
+	c.Assert(kerr, IsNil)
+	c.Assert(result.Id, Equals, "$")
+	c.Assert(result.Doc, Similar, data)
+
+	kerr = DB("db").Table("table").Delete("$", rev).Run(this.conn)
+	c.Assert(kerr, IsNil)
+
+	result, kerr = DB("db").Table("table").Get("$").Run(this.conn)
+	c.Assert(kerr.Status, Equals, http.StatusNotFound)
+	c.Assert(kerr, ErrorMatches, "Record not found")
+}
+
+func (this *TestSuite) TestIndex(c *C) {
+	db, kerr := this.conn.CreateDB("db", "mem", kissdif.Dictionary{})
+	c.Assert(db, NotNil)
+	c.Assert(kerr, IsNil)
+
+	value := "Value"
+	rev, kerr := DB("db").Table("table").Insert("1", value).By("name", "Joe").By("name", "Bob").Run(this.conn)
+	c.Assert(kerr, IsNil)
+	c.Assert(rev, Not(Equals), "")
+
+	result, kerr := DB("db").Table("table").Get("1").Run(this.conn)
+	c.Assert(kerr, IsNil)
+	c.Assert(result.Doc, Equals, value)
+
+	result, kerr = DB("db").Table("table").By("name").Get("Joe").Run(this.conn)
+	c.Assert(kerr, IsNil)
+	c.Assert(result.Doc, Equals, value)
+
+	result, kerr = DB("db").Table("table").By("name").Get("Bob").Run(this.conn)
+	c.Assert(kerr, IsNil)
+	c.Assert(result.Doc, Equals, value)
+
+	resultSet, kerr := DB("db").Table("table").By("name").Run(this.conn)
+	c.Assert(kerr, IsNil)
+	c.Assert(resultSet.More, Equals, false)
+	c.Assert(resultSet.Records, HasLen, 2)
+}
+
+func (this *TestSuite) insert(c *C, key, value string, keys kissdif.IndexMap) string {
+	put := DB("db").Table("table").Insert(key, value)
+	for index, list := range keys {
+		for _, key := range list {
+			put = put.By(index, key)
+		}
+	}
+	rev, kerr := put.Run(this.conn)
+	c.Assert(kerr, IsNil)
+	c.Assert(rev, Not(Equals), "")
+	return rev
+}
+
+func (this *TestSuite) TestQuery(c *C) {
+	db, kerr := this.conn.CreateDB("db", "mem", kissdif.Dictionary{})
+	c.Assert(db, NotNil)
+	c.Assert(kerr, IsNil)
+
+	this.insert(c, "1", "1", nil)
+	this.insert(c, "2", "2", kissdif.IndexMap{"name": []string{"Alice", "Carol"}})
+	this.insert(c, "3", "3", nil)
+
+	result, kerr := DB("db").Table("table").Get("2").Run(this.conn)
+	c.Assert(kerr, IsNil)
+	c.Assert(result.Doc, Equals, "2")
+
+	rs, kerr := DB("db").Table("table").Between("3", "9").Run(this.conn)
+	c.Assert(kerr, IsNil)
+	c.Assert(rs.More, Equals, false)
+	c.Assert(rs.Records, HasLen, 1)
+	c.Assert(rs.Records[0].Doc, Equals, "3")
+
+	rs, kerr = DB("db").Table("table").Between("2", "9").Run(this.conn)
+	c.Assert(kerr, IsNil)
+	c.Assert(rs.More, Equals, false)
+	c.Assert(rs.Records, HasLen, 2)
+	c.Assert(rs.Records[0].Doc, Equals, "2")
+	c.Assert(rs.Records[1].Doc, Equals, "3")
+
+	rs, kerr = DB("db").Table("table").Between("1", "3").Run(this.conn)
+	c.Assert(kerr, IsNil)
+	c.Assert(rs.More, Equals, false)
+	c.Assert(rs.Records, HasLen, 2)
+	c.Assert(rs.Records[0].Doc, Equals, "1")
+	c.Assert(rs.Records[1].Doc, Equals, "2")
 }

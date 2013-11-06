@@ -55,10 +55,10 @@ func (this *TestSuite) putRecord(value string, keys IndexMap) string {
 
 func (this *TestSuite) putRecordFull(id, rev, value string, keys IndexMap) string {
 	record := &Record{Id: id, Rev: rev, Doc: value, Keys: keys}
-	newRecord, err := this.table.Put(record)
+	rev, err := this.table.Put(record)
 	this.c.Assert(err, IsNil, Commentf("Record: %v", record))
-	this.c.Assert(newRecord.Rev, Not(Equals), "", Commentf("Record: %v", record))
-	return newRecord.Rev
+	this.c.Assert(rev, Not(Equals), "", Commentf("Record: %v", record))
+	return rev
 }
 
 // mb = make bound
@@ -81,7 +81,7 @@ func (this *TestSuite) expect(test expectedQuery, expectedEof bool, limit uint) 
 		if record == nil {
 			eof = true
 		} else {
-			actual = append(actual, record.Doc)
+			actual = append(actual, record.Doc.(string))
 		}
 	}
 	this.c.Check(actual, DeepEquals, test.expected, Commentf("Query: %v", query))
@@ -353,24 +353,24 @@ func (this *TestSuite) TestMVCC(c *C) {
 
 	record = &Record{Id: "a", Doc: "a"}
 	cur, err := this.table.Put(record)
-	this.c.Assert(cur, IsNil)
+	this.c.Assert(cur, Equals, "")
 	this.c.Assert(err, NotNil)
 	this.c.Assert(err.Status, Equals, http.StatusConflict)
 
-	record = &Record{Id: "a", Rev: prev.Rev, Doc: "a"}
+	record = &Record{Id: "a", Rev: prev, Doc: "a"}
 	cur, err = this.table.Put(record)
 	this.c.Assert(err, IsNil)
-	this.c.Assert(cur.Rev, Equals, prev.Rev)
+	this.c.Assert(cur, Equals, prev)
 
 	prev = cur
-	record = &Record{Id: "a", Rev: cur.Rev, Doc: "b"}
+	record = &Record{Id: "a", Rev: cur, Doc: "b"}
 	cur, err = this.table.Put(record)
 	this.c.Assert(err, IsNil)
-	this.c.Assert(cur.Rev, Not(Equals), prev.Rev)
+	this.c.Assert(cur, Not(Equals), prev)
 
 	record = &Record{Id: "a", Rev: "xxx", Doc: "b"}
 	cur, err = this.table.Put(record)
-	this.c.Assert(cur, IsNil)
+	this.c.Assert(cur, Equals, "")
 	this.c.Assert(err, NotNil)
 	this.c.Assert(err.Status, Equals, http.StatusConflict)
 }
