@@ -73,7 +73,7 @@ type putStmt struct {
 	*queryImpl
 }
 
-type singleStmt struct {
+type getStmt struct {
 	*queryImpl
 }
 
@@ -86,7 +86,6 @@ type queryImpl struct {
 	table  string
 	record kissdif.Record
 	query  kissdif.Query
-	doc    interface{}
 }
 
 func Connect(url string) (Conn, *kissdif.Error) {
@@ -148,7 +147,7 @@ func (this *queryImpl) Get(key string) SingleStmt {
 	this.query.Limit = 1
 	this.query.Lower = bound
 	this.query.Upper = bound
-	return &singleStmt{this}
+	return &getStmt{this}
 }
 
 func (this *queryImpl) GetAll(key string) Limitable {
@@ -200,7 +199,7 @@ func (this *queryImpl) Run(conn Conn) (*kissdif.ResultSet, *kissdif.Error) {
 	return conn.(iConn).Get(this)
 }
 
-func (this *singleStmt) Run(conn Conn) (*kissdif.Record, *kissdif.Error) {
+func (this *getStmt) Run(conn Conn) (*kissdif.Record, *kissdif.Error) {
 	if conn == nil {
 		return nil, kissdif.NewError(http.StatusBadRequest, "conn must not be null")
 	}
