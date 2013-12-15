@@ -63,7 +63,7 @@ func (this *httpConn) DropDB(name string) *kissdif.Error {
 	return kissdif.NewError(http.StatusNotImplemented, "Not implemented")
 }
 
-func (this *httpConn) Get(impl *queryImpl) (*kissdif.ResultSet, *kissdif.Error) {
+func (this *httpConn) get(impl *queryImpl) (*kissdif.ResultSet, *kissdif.Error) {
 	args := make(url.Values)
 	if impl.query.Limit != 0 {
 		args.Set("limit", strconv.Itoa(int(impl.query.Limit)))
@@ -108,7 +108,7 @@ func (this *httpConn) Get(impl *queryImpl) (*kissdif.ResultSet, *kissdif.Error) 
 	return &result, nil
 }
 
-func (this *httpConn) Put(impl *queryImpl) (string, *kissdif.Error) {
+func (this *httpConn) put(impl *queryImpl) (string, *kissdif.Error) {
 	var buf bytes.Buffer
 	err := json.NewEncoder(&buf).Encode(impl.record)
 	if err != nil {
@@ -140,7 +140,7 @@ func (this *httpConn) Put(impl *queryImpl) (string, *kissdif.Error) {
 	return rev, nil
 }
 
-func (this *httpConn) Delete(impl *queryImpl) *kissdif.Error {
+func (this *httpConn) delete(impl *queryImpl) *kissdif.Error {
 	url := this.makeUrl(impl) + "/" + url.QueryEscape(impl.record.Id)
 	req, err := http.NewRequest("DELETE", url, nil)
 	if err != nil {

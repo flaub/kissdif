@@ -259,6 +259,19 @@ func (this *Table) Get(query *Query) (chan (*Record), *Error) {
 	return ch, nil
 }
 
+type referee struct {
+	ok bool
+	tx *sql.Tx
+}
+
+func (this *referee) Close() {
+	if this.ok {
+		this.tx.Commit()
+	} else {
+		this.tx.Rollback()
+	}
+}
+
 func (this *Table) Put(record *Record) (string, *Error) {
 	var buf bytes.Buffer
 	err := json.NewEncoder(&buf).Encode(record.Doc)
@@ -278,10 +291,11 @@ func (this *Table) Put(record *Record) (string, *Error) {
 	if err != nil {
 		return "", NewError(http.StatusInternalServerError, err.Error())
 	}
+	ref := referee{tx: tx}
+	defer ref.Close()
 	if record.Rev == "" {
 		_, err = tx.Exec(compile(sqlRecordInsert, this.name, ""), record.Id, rev, doc)
 		if err != nil {
-			tx.Rollback()
 			return "", NewError(http.StatusConflict, err.Error())
 		}
 	} else {
@@ -289,25 +303,22 @@ func (this *Table) Put(record *Record) (string, *Error) {
 			rev, doc, record.Id, record.Rev)
 		rows, err := result.RowsAffected()
 		if err != nil || rows != 1 {
-			tx.Rollback()
 			return "", NewError(http.StatusConflict, "Document update conflict")
 		}
 	}
 	_, err = tx.Exec(compile(sqlIndexDelete, this.name, ""), record.Id)
 	if err != nil {
-		tx.Rollback()
 		return "", NewError(http.StatusInternalServerError, err.Error())
 	}
 	for name, keys := range record.Keys {
 		for _, key := range keys {
 			_, err = tx.Exec(compile(sqlIndexAttach, this.name, ""), record.Id, name, key)
 			if err != nil {
-				tx.Rollback()
 				return "", NewError(http.StatusInternalServerError, err.Error())
 			}
 		}
 	}
-	tx.Commit()
+	ref.ok = true
 	record.Rev = rev
 	return rev, nil
 }
@@ -322,16 +333,16 @@ func (this *Table) Delete(id string) *Error {
 	if err != nil {
 		return NewError(http.StatusInternalServerError, err.Error())
 	}
+	ref := referee{tx: tx}
+	defer ref.Close()
 	_, err = tx.Exec(compile(sqlIndexDelete, this.name, ""), id)
 	if err != nil {
-		tx.Rollback()
 		return NewError(http.StatusInternalServerError, err.Error())
 	}
 	_, err = tx.Exec(compile(sqlRecordDelete, this.name, ""), id)
 	if err != nil {
-		tx.Rollback()
 		return NewError(http.StatusInternalServerError, err.Error())
 	}
-	tx.Commit()
+	ref.ok = true
 	return nil
 }

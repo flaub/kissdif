@@ -1,15 +1,12 @@
 package rql
 
 import (
-	"bytes"
-	"encoding/json"
 	"github.com/flaub/kissdif"
 	_ "github.com/flaub/kissdif/driver/mem"
 	"github.com/flaub/kissdif/server"
 	. "launchpad.net/gocheck"
 	"net/http"
 	"net/http/httptest"
-	"reflect"
 	"testing"
 )
 
@@ -51,40 +48,12 @@ func (this *TestLocalSuite) SetUpTest(c *C) {
 	c.Assert(kerr, IsNil)
 }
 
-type similarChecker struct {
-	*CheckerInfo
-}
-
-var Similar Checker = &similarChecker{
-	&CheckerInfo{Name: "Similar", Params: []string{"obtained", "expected"}},
-}
-
-func (this *similarChecker) Check(params []interface{}, names []string) (bool, string) {
-	typ := reflect.TypeOf(params[1])
-	value := reflect.New(typ)
-	err := Convert(params[0], value.Interface())
-	if err != nil {
-		return false, err.Error()
-	}
-	other := reflect.Indirect(value).Interface()
-	return reflect.DeepEqual(other, params[1]), ""
-}
-
-func Convert(src, dst interface{}) error {
-	var buf bytes.Buffer
-	err := json.NewEncoder(&buf).Encode(src)
-	if err != nil {
-		return err
-	}
-	return json.NewDecoder(&buf).Decode(dst)
-}
-
 type testDoc struct {
 	Value string
 }
 
 func (this *TestSuite) TestBasic(c *C) {
-	_, kerr := DB("db").Table("table").Get("1").Run(nil)
+	_, kerr := DB("db").Table("table").Get("1").Run(nil, nil)
 	c.Assert(kerr.Status, Equals, http.StatusBadRequest)
 	c.Assert(kerr, ErrorMatches, "conn must not be null")
 
@@ -96,20 +65,20 @@ func (this *TestSuite) TestBasic(c *C) {
 	c.Assert(kerr.Status, Equals, http.StatusNotFound)
 	c.Assert(kerr, ErrorMatches, "Table not found")
 
-	data := testDoc{"foo"}
+	data := &testDoc{"foo"}
 	rev, kerr := DB("db").Table("table").Insert("$", data).Run(this.conn)
 	c.Assert(kerr, IsNil)
 	c.Assert(rev, Not(Equals), "")
 
-	result, kerr := DB("db").Table("table").Get("$").Run(this.conn)
+	result, kerr := DB("db").Table("table").Get("$").Run(this.conn, &testDoc{})
 	c.Assert(kerr, IsNil)
 	c.Assert(result.Id, Equals, "$")
-	c.Assert(result.Doc, Similar, data)
+	c.Assert(result.Doc, DeepEquals, data)
 
 	kerr = DB("db").Table("table").Delete("$", rev).Run(this.conn)
 	c.Assert(kerr, IsNil)
 
-	result, kerr = DB("db").Table("table").Get("$").Run(this.conn)
+	result, kerr = DB("db").Table("table").Get("$").Run(this.conn, &testDoc{})
 	c.Assert(kerr.Status, Equals, http.StatusNotFound)
 	c.Assert(kerr, ErrorMatches, "Record not found")
 }
@@ -124,15 +93,15 @@ func (this *TestSuite) TestIndex(c *C) {
 	c.Assert(kerr, IsNil)
 	c.Assert(rev, Not(Equals), "")
 
-	result, kerr := DB("db").Table("table").Get("1").Run(this.conn)
+	result, kerr := DB("db").Table("table").Get("1").Run(this.conn, nil)
 	c.Assert(kerr, IsNil)
 	c.Assert(result.Doc, Equals, value)
 
-	result, kerr = DB("db").Table("table").By("name").Get("Joe").Run(this.conn)
+	result, kerr = DB("db").Table("table").By("name").Get("Joe").Run(this.conn, nil)
 	c.Assert(kerr, IsNil)
 	c.Assert(result.Doc, Equals, value)
 
-	result, kerr = DB("db").Table("table").By("name").Get("Bob").Run(this.conn)
+	result, kerr = DB("db").Table("table").By("name").Get("Bob").Run(this.conn, nil)
 	c.Assert(kerr, IsNil)
 	c.Assert(result.Doc, Equals, value)
 
@@ -164,7 +133,7 @@ func (this *TestSuite) TestQuery(c *C) {
 	this.insert(c, "2", "2", kissdif.IndexMap{"name": []string{"Alice", "Carol"}})
 	this.insert(c, "3", "3", nil)
 
-	result, kerr := DB("db").Table("table").Get("2").Run(this.conn)
+	result, kerr := DB("db").Table("table").Get("2").Run(this.conn, nil)
 	c.Assert(kerr, IsNil)
 	c.Assert(result.Doc, Equals, "2")
 

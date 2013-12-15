@@ -23,7 +23,7 @@ func NewServer() *Server {
 
 	this := &Server{
 		Server: http.Server{
-			Addr:    ":8080",
+			Addr:    ":7780",
 			Handler: router,
 		},
 		dbs: make(map[string]driver.Database),
@@ -93,7 +93,7 @@ func (this *Server) getTable(vars map[string]string, create bool) (driver.Table,
 }
 
 func (this *Server) putDb(resp http.ResponseWriter, req *http.Request) {
-	fmt.Printf("PUT db: %v\n", req.URL)
+	// fmt.Printf("PUT db: %v\n", req.URL)
 	vars := mux.Vars(req)
 	dbName, kerr := this.getVar(vars, "db")
 	if kerr != nil {
@@ -122,7 +122,7 @@ func (this *Server) putDb(resp http.ResponseWriter, req *http.Request) {
 }
 
 func (this *Server) putRecord(resp http.ResponseWriter, req *http.Request) {
-	fmt.Printf("PUT record: %v\n", req.URL)
+	// fmt.Printf("PUT record: %v\n", req.URL)
 	contentType := req.Header.Get("Content-Type")
 	if contentType != "application/json" {
 		kerr := NewError(http.StatusBadRequest, fmt.Sprintf("Invalid content type: %v", contentType))
@@ -159,7 +159,7 @@ func (this *Server) putRecord(resp http.ResponseWriter, req *http.Request) {
 }
 
 func (this *Server) doQuery(resp http.ResponseWriter, req *http.Request) {
-	fmt.Printf("GET records: %v\n", req.URL)
+	// fmt.Printf("GET records: %v\n", req.URL)
 	args := req.URL.Query()
 	vars := mux.Vars(req)
 	table, kerr := this.getTable(vars, false)
@@ -187,7 +187,7 @@ func (this *Server) doQuery(resp http.ResponseWriter, req *http.Request) {
 }
 
 func (this *Server) getRecord(resp http.ResponseWriter, req *http.Request) {
-	fmt.Printf("GET record: %v\n", req.URL)
+	// fmt.Printf("GET record: %v\n", req.URL)
 	args := req.URL.Query()
 	vars := mux.Vars(req)
 	table, kerr := this.getTable(vars, false)
@@ -214,7 +214,7 @@ func (this *Server) getRecord(resp http.ResponseWriter, req *http.Request) {
 }
 
 func (this *Server) deleteRecord(resp http.ResponseWriter, req *http.Request) {
-	fmt.Printf("DELETE record: %v\n", req.URL)
+	// fmt.Printf("DELETE record: %v\n", req.URL)
 	vars := mux.Vars(req)
 	table, kerr := this.getTable(vars, false)
 	if kerr != nil {

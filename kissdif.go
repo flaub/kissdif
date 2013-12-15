@@ -11,6 +11,12 @@ type ResultSet struct {
 	Records []*Record
 }
 
+type RecordReader interface {
+	Next() bool
+	Err() *Error
+	Record() *Record
+}
+
 type DatabaseCfg struct {
 	Name   string            `json:"name"`
 	Driver string            `json:"driver"`
@@ -120,4 +126,8 @@ func (this *Query) String() string {
 		str += this.Upper.Value
 	}
 	return str
+}
+
+func (this *ResultSet) Reader() RecordReader {
+	return nil
 }

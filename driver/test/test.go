@@ -3,29 +3,16 @@ package test
 import (
 	. "github.com/flaub/kissdif"
 	. "github.com/flaub/kissdif/driver"
-	_ "github.com/flaub/kissdif/driver/mem"
-	_ "github.com/flaub/kissdif/driver/sql"
-	"io/ioutil"
 	. "launchpad.net/gocheck"
 	"net/http"
-	"os"
-	"testing"
 )
 
 type TestSuite struct {
 	name   string
 	db     Database
-	config Dictionary
+	Config Dictionary
 	table  Table
 	c      *C
-}
-
-type TestDriverMemory struct {
-	TestSuite
-}
-
-type TestDriverSql struct {
-	TestSuite
 }
 
 type expectedQuery struct {
@@ -35,12 +22,8 @@ type expectedQuery struct {
 	expected []string
 }
 
-// Hook up gocheck into the "go test" runner.
-func Test(t *testing.T) { TestingT(t) }
-
-func init() {
-	Suite(&TestDriverMemory{TestSuite: TestSuite{name: "mem"}})
-	Suite(&TestDriverSql{TestSuite: TestSuite{name: "sql"}})
+func NewTestSuite(name string) *TestSuite {
+	return &TestSuite{name: name}
 }
 
 func (this *TestSuite) putValues(values ...string) {
@@ -94,34 +77,15 @@ func (this *TestSuite) query(eof bool, limit uint, set []expectedQuery) {
 	}
 }
 
-func getTemp(c *C) string {
-	ftmp, err := ioutil.TempFile("", "")
-	c.Assert(err, IsNil)
-	defer ftmp.Close()
-	return ftmp.Name()
-}
-
 func (this *TestSuite) SetUpTest(c *C) {
 	drv, err := Open(this.name)
 	c.Assert(err, IsNil)
-	this.db, err = drv.Configure("db", this.config)
+	this.db, err = drv.Configure("db", this.Config)
 	c.Assert(err, IsNil)
 	c.Assert(this.db, NotNil)
 	this.table, err = this.db.GetTable("table", true)
 	c.Assert(err, IsNil)
 	c.Assert(this.table, NotNil)
-}
-
-func (this *TestDriverSql) SetUpTest(c *C) {
-	this.config = make(Dictionary)
-	this.config["dsn"] = getTemp(c) + ".db"
-	this.TestSuite.SetUpTest(c)
-}
-
-func (this *TestDriverSql) TearDownTest(c *C) {
-	path := this.config["dsn"]
-	c.Logf("Removing %q", path)
-	os.Remove(path)
 }
 
 func (this *TestSuite) TestBasic(c *C) {
