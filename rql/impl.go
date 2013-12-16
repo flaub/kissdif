@@ -2,7 +2,6 @@ package rql
 
 import (
 	"github.com/flaub/kissdif"
-	"github.com/mitchellh/mapstructure"
 	"net/http"
 )
 
@@ -111,11 +110,11 @@ func (this *deleteStmt) Run(conn Conn) *kissdif.Error {
 	return conn.delete(this.queryImpl)
 }
 
-func (this *queryImpl) Run(conn Conn) (*kissdif.ResultSet, *kissdif.Error) {
+func (this *queryImpl) Run(conn Conn) (*ResultSet, *kissdif.Error) {
 	return conn.get(this)
 }
 
-func (this *getStmt) Run(conn Conn, into interface{}) (*kissdif.Record, *kissdif.Error) {
+func (this *getStmt) Run(conn Conn) (Record, *kissdif.Error) {
 	if conn == nil {
 		return nil, kissdif.NewError(http.StatusBadRequest, "conn must not be null")
 	}
@@ -131,12 +130,5 @@ func (this *getStmt) Run(conn Conn, into interface{}) (*kissdif.Record, *kissdif
 		return nil, kissdif.NewError(http.StatusNotFound, "Record not found")
 	}
 	record := resultSet.Records[0]
-	if into != nil {
-		err := mapstructure.Decode(record.Doc, into)
-		if err != nil {
-			return nil, kissdif.NewError(http.StatusBadRequest, err.Error())
-		}
-		record.Doc = into
-	}
 	return record, nil
 }

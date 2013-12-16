@@ -3,13 +3,20 @@ package server
 import (
 	"encoding/json"
 	"fmt"
+	"github.com/ant0ine/go-json-rest"
 	. "github.com/flaub/kissdif"
 	"github.com/flaub/kissdif/driver"
-	"github.com/gorilla/mux"
+	"github.com/ugorji/go/codec"
+	"mime"
 	"net/http"
 	"net/url"
 	"strconv"
+	"strings"
 	"sync"
+)
+
+var (
+	MsgpackHandle = &codec.MsgpackHandle{}
 )
 
 type Server struct {
@@ -18,40 +25,88 @@ type Server struct {
 	mutex sync.RWMutex
 }
 
+type Decoder interface {
+	Decode(v interface{}) error
+}
+
+type Request struct {
+	*rest.Request
+	dec Decoder
+}
+
+func (this *Request) DecodePayload(v interface{}) error {
+	return this.dec.Decode(v)
+}
+
+type Encoder interface {
+	Encode(v interface{}) error
+}
+
+type ResponseWriter struct {
+	*rest.ResponseWriter
+	enc Encoder
+}
+
+func (this *ResponseWriter) WriteData(v interface{}) error {
+	return this.enc.Encode(v)
+}
+
+type RestHandlerFunc func(*rest.ResponseWriter, *rest.Request)
+type HandlerFunc func(*ResponseWriter, *Request)
+
+func typeWrapper(fn HandlerFunc) RestHandlerFunc {
+	return func(resp *rest.ResponseWriter, req *rest.Request) {
+		ctype := req.Header.Get("Content-Type")
+		mediatype, params, _ := mime.ParseMediaType(ctype)
+		charset, ok := params["charset"]
+		if !ok {
+			charset = "utf-8"
+		}
+		if strings.ToLower(charset) != "utf-8" {
+			http.Error(resp, "Bad charset", http.StatusUnsupportedMediaType)
+		}
+		var enc Encoder
+		var dec Decoder
+		switch mediatype {
+		case "application/json":
+			dec = json.NewDecoder(req.Body)
+			enc = json.NewEncoder(resp)
+		case "application/x-msgpack":
+			dec = codec.NewDecoder(req.Body, MsgpackHandle)
+			enc = codec.NewEncoder(resp, MsgpackHandle)
+		default:
+			msg := fmt.Sprintf("Bad Content-Type: %q", mediatype)
+			http.Error(resp, msg, http.StatusUnsupportedMediaType)
+		}
+		w := &ResponseWriter{ResponseWriter: resp, enc: enc}
+		r := &Request{Request: req, dec: dec}
+		fn(w, r)
+		return
+	}
+}
+
 func NewServer() *Server {
-	router := mux.NewRouter()
+	handler := &rest.ResourceHandler{
+		EnableRelaxedContentType: true,
+	}
 
 	this := &Server{
 		Server: http.Server{
 			Addr:    ":7780",
-			Handler: router,
+			Handler: handler,
 		},
 		dbs: make(map[string]driver.Database),
 	}
 
-	router.HandleFunc("/{db}", this.putDb).
-		Methods("PUT")
-	router.HandleFunc("/{db}/{table}/{index}", this.doQuery).
-		Methods("GET")
-	router.HandleFunc("/{db}/{table}/{index}/{key:.+}", this.getRecord).
-		Methods("GET")
-	router.HandleFunc("/{db}/{table}/_id/{key:.+}", this.putRecord).
-		Methods("PUT")
-	router.HandleFunc("/{db}/{table}/_id/{key:.+}", this.deleteRecord).
-		Methods("DELETE")
+	handler.SetRoutes(
+		rest.Route{"PUT", "/:db", typeWrapper(this.putDb)},
+		rest.Route{"GET", "/:db/:table/:index", typeWrapper(this.doQuery)},
+		rest.Route{"GET", "/:db/:table/:index/*key", typeWrapper(this.getRecord)},
+		rest.Route{"PUT", "/:db/:table/_id/*key", typeWrapper(this.putRecord)},
+		rest.Route{"DELETE", "/:db/:table/_id/*key", typeWrapper(this.deleteRecord)},
+	)
 
 	return this
-}
-
-func (this *Server) sendError(resp http.ResponseWriter, err *Error) {
-	resp.Header().Set("Content-Type", "application/json")
-	resp.WriteHeader(err.Status)
-	resp.Write([]byte(err.Error()))
-}
-
-func (this *Server) sendJson(resp http.ResponseWriter, data interface{}) {
-	resp.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(resp).Encode(data)
 }
 
 func (this *Server) findDb(name string) (driver.Database, *Error) {
@@ -64,8 +119,8 @@ func (this *Server) findDb(name string) (driver.Database, *Error) {
 	return db, nil
 }
 
-func (this *Server) getVar(vars map[string]string, name string) (string, *Error) {
-	raw, ok := vars[name]
+func (this *Server) getVar(req *Request, name string) (string, *Error) {
+	raw, ok := req.PathParams[name]
 	if !ok {
 		return "", NewError(http.StatusInternalServerError, fmt.Sprintf("Missing route variable: %v", name))
 	}
@@ -76,8 +131,8 @@ func (this *Server) getVar(vars map[string]string, name string) (string, *Error)
 	return value, nil
 }
 
-func (this *Server) getTable(vars map[string]string, create bool) (driver.Table, *Error) {
-	dbName, kerr := this.getVar(vars, "db")
+func (this *Server) getTable(req *Request, create bool) (driver.Table, *Error) {
+	dbName, kerr := this.getVar(req, "db")
 	if kerr != nil {
 		return nil, kerr
 	}
@@ -85,35 +140,34 @@ func (this *Server) getTable(vars map[string]string, create bool) (driver.Table,
 	if kerr != nil {
 		return nil, kerr
 	}
-	tableName, kerr := this.getVar(vars, "table")
+	tableName, kerr := this.getVar(req, "table")
 	if kerr != nil {
 		return nil, kerr
 	}
 	return db.GetTable(tableName, create)
 }
 
-func (this *Server) putDb(resp http.ResponseWriter, req *http.Request) {
+func (this *Server) putDb(resp *ResponseWriter, req *Request) {
 	// fmt.Printf("PUT db: %v\n", req.URL)
-	vars := mux.Vars(req)
-	dbName, kerr := this.getVar(vars, "db")
+	dbName, kerr := this.getVar(req, "db")
 	if kerr != nil {
-		this.sendError(resp, kerr)
+		http.Error(resp, kerr.Error(), kerr.Status)
 		return
 	}
 	var dbcfg DatabaseCfg
-	err := json.NewDecoder(req.Body).Decode(&dbcfg)
+	err := req.DecodePayload(&dbcfg)
 	if err != nil {
-		this.sendError(resp, NewError(http.StatusBadRequest, err.Error()))
+		http.Error(resp, err.Error(), http.StatusBadRequest)
 		return
 	}
 	drv, kerr := driver.Open(dbcfg.Driver)
 	if kerr != nil {
-		this.sendError(resp, kerr)
+		http.Error(resp, kerr.Error(), kerr.Status)
 		return
 	}
 	db, kerr := drv.Configure(dbName, dbcfg.Config)
 	if kerr != nil {
-		this.sendError(resp, kerr)
+		http.Error(resp, kerr.Error(), kerr.Status)
 		return
 	}
 	this.mutex.Lock()
@@ -121,109 +175,114 @@ func (this *Server) putDb(resp http.ResponseWriter, req *http.Request) {
 	this.dbs[dbName] = db
 }
 
-func (this *Server) putRecord(resp http.ResponseWriter, req *http.Request) {
+func (this *Server) putRecord(resp *ResponseWriter, req *Request) {
 	// fmt.Printf("PUT record: %v\n", req.URL)
-	contentType := req.Header.Get("Content-Type")
-	if contentType != "application/json" {
-		kerr := NewError(http.StatusBadRequest, fmt.Sprintf("Invalid content type: %v", contentType))
-		this.sendError(resp, kerr)
-		return
-	}
-	vars := mux.Vars(req)
-	table, kerr := this.getTable(vars, true)
+	table, kerr := this.getTable(req, true)
 	if kerr != nil {
-		this.sendError(resp, kerr)
+		http.Error(resp, kerr.Error(), kerr.Status)
 		return
 	}
 	var record Record
-	err := json.NewDecoder(req.Body).Decode(&record)
+	err := req.DecodePayload(&record)
 	if err != nil {
-		this.sendError(resp, NewError(http.StatusBadRequest, err.Error()))
+		http.Error(resp, err.Error(), http.StatusBadRequest)
 		return
 	}
-	id, kerr := this.getVar(vars, "key")
+	id, kerr := this.getVar(req, "key")
 	if kerr != nil {
-		this.sendError(resp, kerr)
+		http.Error(resp, kerr.Error(), kerr.Status)
 		return
 	}
 	if record.Id != id {
-		this.sendError(resp, NewError(http.StatusBadRequest, "ID Mismatch"))
+		http.Error(resp, "ID Mismatch", http.StatusBadRequest)
 		return
 	}
 	rev, kerr := table.Put(&record)
 	if kerr != nil {
-		this.sendError(resp, kerr)
+		http.Error(resp, kerr.Error(), kerr.Status)
 		return
 	}
-	this.sendJson(resp, rev)
+	resp.WriteData(rev)
 }
 
-func (this *Server) doQuery(resp http.ResponseWriter, req *http.Request) {
+func (this *Server) doQuery(resp *ResponseWriter, req *Request) {
 	// fmt.Printf("GET records: %v\n", req.URL)
 	args := req.URL.Query()
-	vars := mux.Vars(req)
-	table, kerr := this.getTable(vars, false)
+	table, kerr := this.getTable(req, false)
 	if kerr != nil {
-		this.sendError(resp, kerr)
+		http.Error(resp, kerr.Error(), kerr.Status)
 		return
 	}
 	lower, upper, kerr := getBounds(args)
 	if kerr != nil {
-		this.sendError(resp, kerr)
+		http.Error(resp, kerr.Error(), kerr.Status)
 		return
 	}
 	limit, kerr := getLimit(args)
 	if kerr != nil {
-		this.sendError(resp, kerr)
+		http.Error(resp, kerr.Error(), kerr.Status)
 		return
 	}
-	query := NewQuery(vars["index"], lower, upper, limit)
+	index, kerr := this.getVar(req, "index")
+	if kerr != nil {
+		http.Error(resp, kerr.Error(), kerr.Status)
+		return
+	}
+	query := NewQuery(index, lower, upper, limit)
 	result, kerr := this.processQuery(table, query)
 	if kerr != nil {
-		this.sendError(resp, kerr)
+		http.Error(resp, kerr.Error(), kerr.Status)
 		return
 	}
-	this.sendJson(resp, result)
+	resp.WriteData(result)
 }
 
-func (this *Server) getRecord(resp http.ResponseWriter, req *http.Request) {
+func (this *Server) getRecord(resp *ResponseWriter, req *Request) {
 	// fmt.Printf("GET record: %v\n", req.URL)
 	args := req.URL.Query()
-	vars := mux.Vars(req)
-	table, kerr := this.getTable(vars, false)
+	table, kerr := this.getTable(req, false)
 	if kerr != nil {
-		this.sendError(resp, kerr)
+		http.Error(resp, kerr.Error(), kerr.Status)
 		return
 	}
 	limit, kerr := getLimit(args)
 	if kerr != nil {
-		this.sendError(resp, kerr)
+		http.Error(resp, kerr.Error(), kerr.Status)
 		return
 	}
-	query := NewQueryEQ(vars["index"], vars["key"], limit)
+	index, kerr := this.getVar(req, "index")
+	if kerr != nil {
+		http.Error(resp, kerr.Error(), kerr.Status)
+		return
+	}
+	key, kerr := this.getVar(req, "key")
+	if kerr != nil {
+		http.Error(resp, kerr.Error(), kerr.Status)
+		return
+	}
+	query := NewQueryEQ(index, key, limit)
 	result, kerr := this.processQuery(table, query)
 	if kerr != nil {
-		this.sendError(resp, kerr)
+		http.Error(resp, kerr.Error(), kerr.Status)
 		return
 	}
 	if len(result.Records) == 0 {
-		this.sendError(resp, NewError(http.StatusNotFound, "Record not found"))
+		http.Error(resp, "Record not found", http.StatusNotFound)
 		return
 	}
-	this.sendJson(resp, result)
+	resp.WriteData(result)
 }
 
-func (this *Server) deleteRecord(resp http.ResponseWriter, req *http.Request) {
+func (this *Server) deleteRecord(resp *ResponseWriter, req *Request) {
 	// fmt.Printf("DELETE record: %v\n", req.URL)
-	vars := mux.Vars(req)
-	table, kerr := this.getTable(vars, false)
+	table, kerr := this.getTable(req, false)
 	if kerr != nil {
-		this.sendError(resp, kerr)
+		http.Error(resp, kerr.Error(), kerr.Status)
 		return
 	}
-	key, kerr := this.getVar(vars, "key")
+	key, kerr := this.getVar(req, "key")
 	if kerr != nil {
-		this.sendError(resp, kerr)
+		http.Error(resp, kerr.Error(), kerr.Status)
 		return
 	}
 	table.Delete(key)

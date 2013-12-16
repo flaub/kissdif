@@ -1,16 +1,37 @@
 package rql
 
 import (
+	"encoding/json"
 	_ "fmt"
 	"github.com/flaub/kissdif"
 	"net/http"
 	_url "net/url"
 )
 
+type ResultSet struct {
+	More    bool
+	Records []*_Record
+}
+
+type Record interface {
+	Id() string
+	Rev() string
+	Doc(into interface{}) error
+	Keys() kissdif.IndexMap
+}
+
+type _Record struct {
+	_struct bool             `codec:",omitempty"` // set omitempty for every field
+	Id_     string           `json:"id",omitempty`
+	Rev_    string           `json:"rev",omitempty`
+	Doc_    json.RawMessage  `json:"doc",omitempty`
+	Keys_   kissdif.IndexMap `json:"keys",omitempty`
+}
+
 type Conn interface {
 	CreateDB(name, driver string, config kissdif.Dictionary) (Database, *kissdif.Error)
 	DropDB(name string) *kissdif.Error
-	get(query *queryImpl) (*kissdif.ResultSet, *kissdif.Error)
+	get(query *queryImpl) (*ResultSet, *kissdif.Error)
 	put(query *queryImpl) (string, *kissdif.Error)
 	delete(query *queryImpl) *kissdif.Error
 }
@@ -25,7 +46,7 @@ type ExecStmt interface {
 }
 
 type SingleStmt interface {
-	Run(conn Conn, doc interface{}) (*kissdif.Record, *kissdif.Error)
+	Run(conn Conn) (Record, *kissdif.Error)
 }
 
 type PutStmt interface {
@@ -34,7 +55,7 @@ type PutStmt interface {
 }
 
 type MultiStmt interface {
-	Run(conn Conn) (*kissdif.ResultSet, *kissdif.Error)
+	Run(conn Conn) (*ResultSet, *kissdif.Error)
 }
 
 type Bound struct {
@@ -74,8 +95,8 @@ func Connect(url string) (Conn, *kissdif.Error) {
 	switch theUrl.Scheme {
 	case "http", "https":
 		return newHttpConn(url), nil
-	case "local":
-		return newLocalConn(), nil
+	// case "local":
+	// 	return newLocalConn(), nil
 	default:
 		return nil, kissdif.NewError(http.StatusBadRequest, "Unrecognized connection scheme")
 	}
@@ -83,4 +104,42 @@ func Connect(url string) (Conn, *kissdif.Error) {
 
 func DB(name string) Database {
 	return newQuery(name)
+}
+
+type RecordReader struct {
+	records []*_Record
+	index   int
+}
+
+func (this *_Record) Id() string {
+	return this.Id_
+}
+
+func (this *_Record) Rev() string {
+	return this.Rev_
+}
+
+func (this *_Record) Doc(into interface{}) error {
+	return json.Unmarshal(this.Doc_, into)
+}
+
+func (this *_Record) Keys() kissdif.IndexMap {
+	return this.Keys_
+}
+
+func (this *ResultSet) Reader() *RecordReader {
+	return &RecordReader{records: this.Records}
+}
+
+func (this *RecordReader) Next() bool {
+	if this.index == len(this.records) {
+		return false
+	}
+	this.index++
+	return true
+}
+
+func (this *RecordReader) Record(doc interface{}) error {
+	record := this.records[this.index]
+	return record.Doc(doc)
 }

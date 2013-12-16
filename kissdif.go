@@ -2,6 +2,11 @@ package kissdif
 
 import (
 	"fmt"
+	"log"
+)
+
+var (
+	_ = log.Printf
 )
 
 type Dictionary map[string]string
@@ -11,16 +16,11 @@ type ResultSet struct {
 	Records []*Record
 }
 
-type RecordReader interface {
-	Next() bool
-	Err() *Error
-	Record() *Record
-}
-
 type DatabaseCfg struct {
-	Name   string            `json:"name"`
-	Driver string            `json:"driver"`
-	Config map[string]string `json:"config"`
+	_struct bool              `codec:",omitempty"` // set omitempty for every field
+	Name    string            `json:"name",omitempty`
+	Driver  string            `json:"driver",omitempty`
+	Config  map[string]string `json:"config",omitempty`
 }
 
 type Bound struct {
@@ -38,10 +38,11 @@ type Query struct {
 type IndexMap map[string][]string
 
 type Record struct {
-	Id   string      `json:"id"`
-	Rev  string      `json:"rev"`
-	Doc  interface{} `json:"doc"`
-	Keys IndexMap    `json:"keys",omitempty`
+	_struct bool        `codec:",omitempty"` // set omitempty for every field
+	Id      string      `json:"id",omitempty`
+	Rev     string      `json:"rev",omitempty`
+	Doc     interface{} `json:"doc",omitempty`
+	Keys    IndexMap    `json:"keys",omitempty`
 }
 
 type Error struct {
@@ -126,8 +127,4 @@ func (this *Query) String() string {
 		str += this.Upper.Value
 	}
 	return str
-}
-
-func (this *ResultSet) Reader() RecordReader {
-	return nil
 }

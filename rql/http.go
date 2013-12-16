@@ -5,18 +5,76 @@ import (
 	"encoding/json"
 	"fmt"
 	"github.com/flaub/kissdif"
+	"github.com/ugorji/go/codec"
+	"io"
 	"io/ioutil"
 	"net/http"
 	"net/url"
 	"strconv"
+	"strings"
 )
 
+var (
+	MsgpackHandle = &codec.MsgpackHandle{}
+)
+
+type Decoder interface {
+	Decode(v interface{}) error
+}
+
+type Encoder interface {
+	Encode(v interface{}) error
+}
+
+type MakeDecoder func(io.Reader) Decoder
+type MakeEncoder func(io.Writer) Encoder
+
 type httpConn struct {
-	baseUrl string
+	baseUrl   string
+	formatter formatter
+}
+
+type formatter interface {
+	ContentType() string
+	Encoder(io.Writer) Encoder
+	Decoder(io.Reader) Decoder
+}
+
+type msgpackFormatter struct{}
+
+func (this *msgpackFormatter) ContentType() string {
+	return "application/x-msgpack"
+}
+
+func (this *msgpackFormatter) Encoder(w io.Writer) Encoder {
+	return codec.NewEncoder(w, MsgpackHandle)
+}
+
+func (this *msgpackFormatter) Decoder(r io.Reader) Decoder {
+	return codec.NewDecoder(r, MsgpackHandle)
+}
+
+type jsonFormatter struct{}
+
+func (this *jsonFormatter) ContentType() string {
+	return "application/json"
+}
+
+func (this *jsonFormatter) Encoder(w io.Writer) Encoder {
+	return json.NewEncoder(w)
+
+}
+
+func (this *jsonFormatter) Decoder(r io.Reader) Decoder {
+	return json.NewDecoder(r)
 }
 
 func newHttpConn(url string) *httpConn {
-	return &httpConn{url}
+	return &httpConn{
+		baseUrl: url,
+		// formatter: &msgpackFormatter{},
+		formatter: &jsonFormatter{},
+	}
 }
 
 func (this *httpConn) makeUrl(impl *queryImpl) string {
@@ -27,6 +85,56 @@ func (this *httpConn) makeUrl(impl *queryImpl) string {
 		url.QueryEscape(impl.query.Index))
 }
 
+func (this *httpConn) sendRequest(method, url string, v interface{}) (*http.Response, *kissdif.Error) {
+	var buf bytes.Buffer
+	err := this.formatter.Encoder(&buf).Encode(v)
+	if err != nil {
+		msg := fmt.Sprintf("Encoder error: %v", err)
+		return nil, kissdif.NewError(http.StatusBadRequest, msg)
+	}
+	req, err := http.NewRequest(method, url, &buf)
+	if err != nil {
+		msg := fmt.Sprintf("Bad request: %v", err)
+		return nil, kissdif.NewError(http.StatusBadRequest, msg)
+	}
+	req.Header.Set("Content-Type", this.formatter.ContentType())
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		msg := fmt.Sprintf("Client error: %v", err)
+		return nil, kissdif.NewError(http.StatusBadRequest, msg)
+	}
+	return resp, nil
+}
+
+func (this *httpConn) recvReply(resp *http.Response, v interface{}) *kissdif.Error {
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		body, err := ioutil.ReadAll(resp.Body)
+		if err != nil {
+			msg := fmt.Sprintf("Body error: %v", err)
+			return kissdif.NewError(http.StatusBadRequest, msg)
+		}
+		msg := fmt.Sprintf("Server error: %v", strings.TrimSpace(string(body)))
+		return kissdif.NewError(resp.StatusCode, msg)
+	}
+	if v != nil {
+		err := this.formatter.Decoder(resp.Body).Decode(v)
+		if err != nil {
+			msg := fmt.Sprintf("Decoder error: %v", err)
+			return kissdif.NewError(http.StatusNotAcceptable, msg)
+		}
+	}
+	return nil
+}
+
+func (this *httpConn) roundTrip(method, url string, in, out interface{}) *kissdif.Error {
+	resp, err := this.sendRequest(method, url, in)
+	if err != nil {
+		return err
+	}
+	return this.recvReply(resp, out)
+}
+
 func (this *httpConn) CreateDB(name, driverName string, config kissdif.Dictionary) (Database, *kissdif.Error) {
 	url := fmt.Sprintf("%s/%s", this.baseUrl, name)
 	dbcfg := &kissdif.DatabaseCfg{
@@ -34,27 +142,9 @@ func (this *httpConn) CreateDB(name, driverName string, config kissdif.Dictionar
 		Driver: driverName,
 		Config: config,
 	}
-	var buf bytes.Buffer
-	err := json.NewEncoder(&buf).Encode(dbcfg)
-	if err != nil {
-		return nil, kissdif.NewError(http.StatusBadRequest, err.Error())
-	}
-	req, err := http.NewRequest("PUT", url, &buf)
-	if err != nil {
-		return nil, kissdif.NewError(http.StatusBadRequest, err.Error())
-	}
-	req.Header.Set("Content-Type", "application/json")
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return nil, kissdif.NewError(http.StatusBadRequest, err.Error())
-	}
-	defer resp.Body.Close()
-	result, err := ioutil.ReadAll(resp.Body)
-	if err != nil {
-		return nil, kissdif.NewError(http.StatusBadRequest, err.Error())
-	}
-	if resp.StatusCode != http.StatusOK {
-		return nil, kissdif.NewError(resp.StatusCode, string(result))
+	kerr := this.roundTrip("PUT", url, dbcfg, nil)
+	if kerr != nil {
+		return nil, kerr
 	}
 	return newQuery(name), nil
 }
@@ -63,7 +153,10 @@ func (this *httpConn) DropDB(name string) *kissdif.Error {
 	return kissdif.NewError(http.StatusNotImplemented, "Not implemented")
 }
 
-func (this *httpConn) get(impl *queryImpl) (*kissdif.ResultSet, *kissdif.Error) {
+func (this *httpConn) RegisterType(name string, doc interface{}) {
+}
+
+func (this *httpConn) get(impl *queryImpl) (*ResultSet, *kissdif.Error) {
 	args := make(url.Values)
 	if impl.query.Limit != 0 {
 		args.Set("limit", strconv.Itoa(int(impl.query.Limit)))
@@ -88,75 +181,25 @@ func (this *httpConn) get(impl *queryImpl) (*kissdif.ResultSet, *kissdif.Error) 
 		}
 	}
 	url := this.makeUrl(impl) + "?" + args.Encode()
-	resp, err := http.Get(url)
-	if err != nil {
-		return nil, kissdif.NewError(http.StatusBadRequest, err.Error())
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		body, err := ioutil.ReadAll(resp.Body)
-		if err != nil {
-			return nil, kissdif.NewError(http.StatusBadRequest, err.Error())
-		}
-		return nil, kissdif.NewError(resp.StatusCode, string(body))
-	}
-	var result kissdif.ResultSet
-	err = json.NewDecoder(resp.Body).Decode(&result)
-	if err != nil {
-		return nil, kissdif.NewError(http.StatusNotAcceptable, err.Error())
+	var result ResultSet
+	kerr := this.roundTrip("GET", url, nil, &result)
+	if kerr != nil {
+		return nil, kerr
 	}
 	return &result, nil
 }
 
 func (this *httpConn) put(impl *queryImpl) (string, *kissdif.Error) {
-	var buf bytes.Buffer
-	err := json.NewEncoder(&buf).Encode(impl.record)
-	if err != nil {
-		return "", kissdif.NewError(http.StatusBadRequest, err.Error())
-	}
 	url := this.makeUrl(impl) + "/" + url.QueryEscape(impl.record.Id)
-	req, err := http.NewRequest("PUT", url, &buf)
-	if err != nil {
-		return "", kissdif.NewError(http.StatusBadRequest, err.Error())
-	}
-	req.Header.Set("Content-Type", "application/json")
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return "", kissdif.NewError(http.StatusBadRequest, err.Error())
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		result, err := ioutil.ReadAll(resp.Body)
-		if err != nil {
-			return "", kissdif.NewError(http.StatusBadRequest, err.Error())
-		}
-		return "", kissdif.NewError(resp.StatusCode, string(result))
-	}
 	var rev string
-	err = json.NewDecoder(resp.Body).Decode(&rev)
-	if err != nil {
-		return "", kissdif.NewError(http.StatusNotAcceptable, err.Error())
+	kerr := this.roundTrip("PUT", url, impl.record, &rev)
+	if kerr != nil {
+		return "", kerr
 	}
 	return rev, nil
 }
 
 func (this *httpConn) delete(impl *queryImpl) *kissdif.Error {
 	url := this.makeUrl(impl) + "/" + url.QueryEscape(impl.record.Id)
-	req, err := http.NewRequest("DELETE", url, nil)
-	if err != nil {
-		return kissdif.NewError(http.StatusBadRequest, err.Error())
-	}
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return kissdif.NewError(http.StatusBadRequest, err.Error())
-	}
-	defer resp.Body.Close()
-	result, err := ioutil.ReadAll(resp.Body)
-	if err != nil {
-		return kissdif.NewError(http.StatusBadRequest, err.Error())
-	}
-	if resp.StatusCode != http.StatusOK {
-		return kissdif.NewError(resp.StatusCode, string(result))
-	}
-	return nil
+	return this.roundTrip("DELETE", url, nil, nil)
 }

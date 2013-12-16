@@ -182,7 +182,7 @@ func emit(query *Query, value interface{}, ch chan<- (*Record)) {
 }
 
 func emit2(ch chan<- (*Record), record *Record) {
-	result := &Record{record.Id, record.Rev, nil, record.Keys}
+	result := &Record{Id: record.Id, Rev: record.Rev, Keys: record.Keys}
 	buf := bytes.NewBufferString(record.Doc.(string))
 	err := json.NewDecoder(buf).Decode(&result.Doc)
 	if err != nil {

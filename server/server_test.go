@@ -21,7 +21,11 @@ func (this *MainSuite) TestServer(c *C) {
 	ts := httptest.NewServer(NewServer().Server.Handler)
 	defer ts.Close()
 
-	res, err := http.Get(ts.URL + "/mem/table/_id/1")
+	url := ts.URL + "/mem/table/_id/1"
+	req, err := http.NewRequest("GET", url, nil)
+	c.Assert(err, IsNil)
+	req.Header.Set("Content-Type", "application/json")
+	res, err := http.DefaultClient.Do(req)
 	c.Assert(err, IsNil)
 	defer res.Body.Close()
 
