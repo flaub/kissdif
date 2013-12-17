@@ -47,7 +47,7 @@ func (this *localConn) DropDB(name string) *kissdif.Error {
 	return kissdif.NewError(http.StatusNotImplemented, "Not implemented")
 }
 
-func (this *localConn) get(impl *queryImpl) (*kissdif.ResultSet, *kissdif.Error) {
+func (this *localConn) get(impl queryImpl) (*kissdif.ResultSet, *kissdif.Error) {
 	db := this.getDb(impl.db)
 	if db == nil {
 		return nil, kissdif.NewError(http.StatusNotFound, "DB not found")
@@ -74,7 +74,7 @@ func (this *localConn) get(impl *queryImpl) (*kissdif.ResultSet, *kissdif.Error)
 	return result, nil
 }
 
-func (this *localConn) put(impl *queryImpl) (string, *kissdif.Error) {
+func (this *localConn) put(impl queryImpl) (string, *kissdif.Error) {
 	db := this.getDb(impl.db)
 	if db == nil {
 		return "", kissdif.NewError(http.StatusNotFound, "DB not found")
@@ -86,7 +86,7 @@ func (this *localConn) put(impl *queryImpl) (string, *kissdif.Error) {
 	return table.Put(&impl.record)
 }
 
-func (this *localConn) delete(impl *queryImpl) *kissdif.Error {
+func (this *localConn) delete(impl queryImpl) *kissdif.Error {
 	db := this.getDb(impl.db)
 	if db == nil {
 		return kissdif.NewError(http.StatusNotFound, "DB not found")

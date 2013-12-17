@@ -5,10 +5,6 @@ import (
 	"log"
 )
 
-var (
-	_ = log.Printf
-)
-
 type Dictionary map[string]string
 
 type ResultSet struct {
@@ -18,9 +14,9 @@ type ResultSet struct {
 
 type DatabaseCfg struct {
 	_struct bool              `codec:",omitempty"` // set omitempty for every field
-	Name    string            `json:"name",omitempty`
-	Driver  string            `json:"driver",omitempty`
-	Config  map[string]string `json:"config",omitempty`
+	Name    string            `json:",omitempty"`
+	Driver  string            `json:",omitempty"`
+	Config  map[string]string `json:",omitempty"`
 }
 
 type Bound struct {
@@ -39,10 +35,10 @@ type IndexMap map[string][]string
 
 type Record struct {
 	_struct bool        `codec:",omitempty"` // set omitempty for every field
-	Id      string      `json:"id",omitempty`
-	Rev     string      `json:"rev",omitempty`
-	Doc     interface{} `json:"doc",omitempty`
-	Keys    IndexMap    `json:"keys",omitempty`
+	Id      string      `json:",omitempty"`
+	Rev     string      `json:",omitempty"`
+	Doc     interface{} `json:",omitempty"`
+	Keys    IndexMap    `json:",omitempty"`
 }
 
 type Error struct {
@@ -128,3 +124,5 @@ func (this *Query) String() string {
 	}
 	return str
 }
+
+var _ = log.Printf

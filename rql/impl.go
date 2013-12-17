@@ -1,20 +1,65 @@
 package rql
 
 import (
+	"encoding/json"
 	"github.com/flaub/kissdif"
 	"net/http"
 )
 
+type _Record struct {
+	Id_   string           `json:"id,omitempty" codec:"id,omitempty"`
+	Rev_  string           `json:"rev,omitempty" codec:"rev,omitempty"`
+	Doc_  json.RawMessage  `json:"doc,omitempty" codec:"doc,omitempty"`
+	Keys_ kissdif.IndexMap `json:"keys,omitempty" codec:"keys,omitempty"`
+}
+
+func (this *_Record) Id() string {
+	return this.Id_
+}
+
+func (this *_Record) Rev() string {
+	return this.Rev_
+}
+
+func (this *_Record) Scan(into interface{}) (interface{}, error) {
+	err := json.Unmarshal(this.Doc_, into)
+	return into, err
+}
+
+func (this *_Record) MustScan(into interface{}) interface{} {
+	result, err := this.Scan(into)
+	if err != nil {
+		panic(err)
+	}
+	return result
+}
+
+func (this *_Record) Set(doc interface{}) (err error) {
+	this.Doc_, err = json.Marshal(doc)
+	return err
+}
+
+func (this *_Record) MustSet(doc interface{}) {
+	err := this.Set(doc)
+	if err != nil {
+		panic(err)
+	}
+}
+
+func (this *_Record) Keys() kissdif.IndexMap {
+	return this.Keys_
+}
+
 type putStmt struct {
-	*queryImpl
+	queryImpl
 }
 
 type getStmt struct {
-	*queryImpl
+	queryImpl
 }
 
 type deleteStmt struct {
-	*queryImpl
+	queryImpl
 }
 
 type queryImpl struct {
@@ -24,8 +69,8 @@ type queryImpl struct {
 	query  kissdif.Query
 }
 
-func newQuery(db string) *queryImpl {
-	return &queryImpl{
+func newQuery(db string) queryImpl {
+	return queryImpl{
 		db: db,
 		record: kissdif.Record{
 			Keys: make(kissdif.IndexMap),
@@ -37,84 +82,112 @@ func newQuery(db string) *queryImpl {
 	}
 }
 
-func (this *queryImpl) DropTable(name string) ExecStmt {
+func (this queryImpl) DropTable(name string) ExecStmt {
 	this.table = name
 	return nil
 }
 
-func (this *queryImpl) Table(name string) Table {
+func (this queryImpl) Table(name string) Table {
 	this.table = name
 	return this
 }
 
-func (this *queryImpl) Limit(count uint) Query {
+func (this queryImpl) Limit(count uint) Query {
 	this.query.Limit = count
 	return this
 }
 
-func (this *queryImpl) By(index string) Query {
+func (this queryImpl) By(index string) Query {
 	this.query.Index = index
 	return this
 }
 
-func (this *queryImpl) Get(key string) SingleStmt {
+func (this queryImpl) Get(key string) SingleStmt {
 	bound := &kissdif.Bound{true, key}
 	this.query.Limit = 1
 	this.query.Lower = bound
 	this.query.Upper = bound
-	return &getStmt{this}
+	return getStmt{this}
 }
 
-func (this *queryImpl) GetAll(key string) Limitable {
+func (this queryImpl) GetAll(key string) Limitable {
 	bound := &kissdif.Bound{true, key}
 	this.query.Lower = bound
 	this.query.Upper = bound
 	return this
 }
 
-func (this *queryImpl) Between(lower, upper string) Limitable {
+func (this queryImpl) Between(lower, upper string) Limitable {
 	this.query.Lower = &kissdif.Bound{true, lower}
 	this.query.Upper = &kissdif.Bound{false, upper}
 	return this
 }
 
-func (this *queryImpl) Insert(id string, doc interface{}) PutStmt {
+func (this queryImpl) Insert(id string, doc interface{}) PutStmt {
 	this.record.Id = id
 	this.record.Doc = doc
-	return &putStmt{this}
+	return putStmt{this}
 }
 
-func (this *queryImpl) Update(id, rev string, doc interface{}) PutStmt {
+func (this queryImpl) Update(id, rev string, doc interface{}) PutStmt {
 	this.record.Id = id
 	this.record.Rev = rev
 	this.record.Doc = doc
-	return &putStmt{this}
+	return putStmt{this}
 }
 
-func (this *queryImpl) Delete(id, rev string) ExecStmt {
+func (this queryImpl) Delete(id, rev string) ExecStmt {
 	this.record.Id = id
 	this.record.Rev = rev
-	return &deleteStmt{this}
+	return deleteStmt{this}
 }
 
-func (this *putStmt) Run(conn Conn) (string, *kissdif.Error) {
+func (this queryImpl) UpdateRecord(record Record) PutStmt {
+	this.record.Id = record.Id()
+	this.record.Rev = record.Rev()
+	record.MustScan(&this.record.Doc)
+	stmt := putStmt{this}
+	stmt.Keys(record.Keys())
+	return stmt
+}
+
+func (this queryImpl) DeleteRecord(record Record) ExecStmt {
+	this.record.Id = record.Id()
+	this.record.Rev = record.Rev()
+	return deleteStmt{this}
+}
+
+func (this putStmt) Exec(conn Conn) (string, *kissdif.Error) {
 	return conn.put(this.queryImpl)
 }
 
-func (this *putStmt) By(key, value string) PutStmt {
+func (this putStmt) Keys(keys kissdif.IndexMap) PutStmt {
+	this.record.Keys = make(kissdif.IndexMap)
+	for k, v := range keys {
+		this.record.Keys[k] = v
+	}
+	return this
+}
+
+func (this putStmt) By(key, value string) PutStmt {
+	keys := this.record.Keys
+	this.record.Keys = make(kissdif.IndexMap)
+	for k, v := range keys {
+		this.record.Keys[k] = v
+	}
 	this.record.AddKey(key, value)
 	return this
 }
 
-func (this *deleteStmt) Run(conn Conn) *kissdif.Error {
+func (this deleteStmt) Exec(conn Conn) *kissdif.Error {
 	return conn.delete(this.queryImpl)
 }
 
-func (this *queryImpl) Run(conn Conn) (*ResultSet, *kissdif.Error) {
+func (this queryImpl) Exec(conn Conn) (*ResultSet, *kissdif.Error) {
 	return conn.get(this)
 }
 
-func (this *getStmt) Run(conn Conn) (Record, *kissdif.Error) {
+func (this getStmt) Exec(conn Conn) (Record, *kissdif.Error) {
 	if conn == nil {
 		return nil, kissdif.NewError(http.StatusBadRequest, "conn must not be null")
 	}

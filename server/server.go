@@ -7,6 +7,7 @@ import (
 	. "github.com/flaub/kissdif"
 	"github.com/flaub/kissdif/driver"
 	"github.com/ugorji/go/codec"
+	"log"
 	"mime"
 	"net/http"
 	"net/url"
@@ -148,7 +149,7 @@ func (this *Server) getTable(req *Request, create bool) (driver.Table, *Error) {
 }
 
 func (this *Server) putDb(resp *ResponseWriter, req *Request) {
-	// fmt.Printf("PUT db: %v\n", req.URL)
+	// log.Printf("PUT db: %v\n", req.URL)
 	dbName, kerr := this.getVar(req, "db")
 	if kerr != nil {
 		http.Error(resp, kerr.Error(), kerr.Status)
@@ -176,7 +177,6 @@ func (this *Server) putDb(resp *ResponseWriter, req *Request) {
 }
 
 func (this *Server) putRecord(resp *ResponseWriter, req *Request) {
-	// fmt.Printf("PUT record: %v\n", req.URL)
 	table, kerr := this.getTable(req, true)
 	if kerr != nil {
 		http.Error(resp, kerr.Error(), kerr.Status)
@@ -188,6 +188,7 @@ func (this *Server) putRecord(resp *ResponseWriter, req *Request) {
 		http.Error(resp, err.Error(), http.StatusBadRequest)
 		return
 	}
+	log.Printf("PUT record: %v\n%v", req.URL, record)
 	id, kerr := this.getVar(req, "key")
 	if kerr != nil {
 		http.Error(resp, kerr.Error(), kerr.Status)
@@ -238,7 +239,7 @@ func (this *Server) doQuery(resp *ResponseWriter, req *Request) {
 }
 
 func (this *Server) getRecord(resp *ResponseWriter, req *Request) {
-	// fmt.Printf("GET record: %v\n", req.URL)
+	// log.Printf("GET record: %v\n", req.URL)
 	args := req.URL.Query()
 	table, kerr := this.getTable(req, false)
 	if kerr != nil {
@@ -274,7 +275,7 @@ func (this *Server) getRecord(resp *ResponseWriter, req *Request) {
 }
 
 func (this *Server) deleteRecord(resp *ResponseWriter, req *Request) {
-	// fmt.Printf("DELETE record: %v\n", req.URL)
+	// log.Printf("DELETE record: %v\n", req.URL)
 	table, kerr := this.getTable(req, false)
 	if kerr != nil {
 		http.Error(resp, kerr.Error(), kerr.Status)

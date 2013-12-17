@@ -77,7 +77,7 @@ func newHttpConn(url string) *httpConn {
 	}
 }
 
-func (this *httpConn) makeUrl(impl *queryImpl) string {
+func (this *httpConn) makeUrl(impl queryImpl) string {
 	return fmt.Sprintf("%s/%s/%s/%s",
 		this.baseUrl,
 		url.QueryEscape(impl.db),
@@ -156,7 +156,7 @@ func (this *httpConn) DropDB(name string) *kissdif.Error {
 func (this *httpConn) RegisterType(name string, doc interface{}) {
 }
 
-func (this *httpConn) get(impl *queryImpl) (*ResultSet, *kissdif.Error) {
+func (this *httpConn) get(impl queryImpl) (*ResultSet, *kissdif.Error) {
 	args := make(url.Values)
 	if impl.query.Limit != 0 {
 		args.Set("limit", strconv.Itoa(int(impl.query.Limit)))
@@ -189,7 +189,7 @@ func (this *httpConn) get(impl *queryImpl) (*ResultSet, *kissdif.Error) {
 	return &result, nil
 }
 
-func (this *httpConn) put(impl *queryImpl) (string, *kissdif.Error) {
+func (this *httpConn) put(impl queryImpl) (string, *kissdif.Error) {
 	url := this.makeUrl(impl) + "/" + url.QueryEscape(impl.record.Id)
 	var rev string
 	kerr := this.roundTrip("PUT", url, impl.record, &rev)
@@ -199,7 +199,7 @@ func (this *httpConn) put(impl *queryImpl) (string, *kissdif.Error) {
 	return rev, nil
 }
 
-func (this *httpConn) delete(impl *queryImpl) *kissdif.Error {
+func (this *httpConn) delete(impl queryImpl) *kissdif.Error {
 	url := this.makeUrl(impl) + "/" + url.QueryEscape(impl.record.Id)
 	return this.roundTrip("DELETE", url, nil, nil)
 }
