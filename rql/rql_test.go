@@ -65,7 +65,8 @@ func (this *TestSuite) TestBasic() {
 	this.Check(db, NotNil)
 
 	_, kerr = table.Exec(this.conn)
-	this.Equal(kissdif.EBadTable, kerr.Code)
+	cause := ergo.Cause(kerr)
+	this.Equal(kissdif.EBadTable, cause.Code)
 
 	data := &testDoc{Value: "foo"}
 	rev, kerr := table.Insert("$", data).Exec(this.conn)
