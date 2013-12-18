@@ -223,7 +223,7 @@ func (this *Server) putRecord(resp *ResponseWriter, req *Request) interface{} {
 	if err != nil {
 		return NewError(EBadRequest, "err", err.Error())
 	}
-	log.Printf("PUT record: %v\n%v", req.URL, record)
+	// log.Printf("PUT record: %v\n%v", req.URL, record)
 	id, kerr := this.getVar(req, "key")
 	if kerr != nil {
 		return kerr

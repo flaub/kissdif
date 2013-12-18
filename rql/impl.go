@@ -158,7 +158,8 @@ func (this queryImpl) DeleteRecord(record Record) ExecStmt {
 }
 
 func (this putStmt) Exec(conn Conn) (string, *ergo.Error) {
-	return conn.put(this.queryImpl)
+	result, err := conn.put(this.queryImpl)
+	return result, ergo.Chain(err, kissdif.NewError(kissdif.EGeneric))
 }
 
 func (this putStmt) Keys(keys kissdif.IndexMap) PutStmt {
@@ -180,11 +181,13 @@ func (this putStmt) By(key, value string) PutStmt {
 }
 
 func (this deleteStmt) Exec(conn Conn) *ergo.Error {
-	return conn.delete(this.queryImpl)
+	err := conn.delete(this.queryImpl)
+	return ergo.Chain(err, kissdif.NewError(kissdif.EGeneric))
 }
 
 func (this queryImpl) Exec(conn Conn) (*ResultSet, *ergo.Error) {
-	return conn.get(this)
+	result, err := conn.get(this)
+	return result, ergo.Chain(err, kissdif.NewError(kissdif.EGeneric))
 }
 
 func (this getStmt) Exec(conn Conn) (Record, *ergo.Error) {
@@ -193,7 +196,7 @@ func (this getStmt) Exec(conn Conn) (Record, *ergo.Error) {
 	}
 	resultSet, err := conn.get(this.queryImpl)
 	if err != nil {
-		return nil, err
+		return nil, ergo.Chain(err, kissdif.NewError(kissdif.EGeneric))
 	}
 	// fmt.Printf("RS: %v\n", resultSet)
 	if resultSet.More || len(resultSet.Records) > 1 {
