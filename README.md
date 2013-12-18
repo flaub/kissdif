@@ -5,18 +5,18 @@ KISS Data InterFace
 
 # REST API
 
-## Environment Resources
+## Database Resources
 
 ## Table Resources
 
 ## Document Resources
 
-### GET `/{env}/{table}/{index}/{key}`
+### GET `/{db}/{table}/{index}/{key}`
 Retrieve a document.
 
 + Parameters
 
-	+ **env** - Environment name
+	+ **db** - Database name
 	+ **table** - Table name
 	+ **index** - Index to perform lookup on
 	+ **key** - Value of the key used in a lookup
@@ -39,7 +39,7 @@ Retrieve a document.
 + Request
 
 ```http
-GET /env/table/_id/1 HTTP/1.1
+GET /db/table/_id/1 HTTP/1.1
 Accept: application/json
 Host: localhost:9900
 ```
@@ -52,13 +52,13 @@ Content-Type: application/json
 Etag: ""
 ```
 
-### PUT `/{env}/{table}/_id/{id}`
+### PUT `/{db}/{table}/_id/{id}`
 
 The PUT method creates a new named document, or creates a new revision of the existing document.
 
 + Parameters
 
-	+ **env** - Environment name
+	+ **db** - Database name
 	+ **table** - Table name
 	+ **id** - Document ID
 
@@ -70,4 +70,4 @@ The PUT method creates a new named document, or creates a new revision of the ex
 
 	+ ETag - Double quoted document's revision token.
 
-### DELETE `/{env}/{table}/_id/{id}`
+### DELETE `/{db}/{table}/_id/{id}`

@@ -2,6 +2,8 @@ package sql
 
 import (
 	"database/sql"
+	. "github.com/flaub/kissdif"
+	"github.com/flaub/kissdif/driver/test"
 	"io/ioutil"
 	. "launchpad.net/gocheck"
 	"os"
@@ -15,8 +17,25 @@ type TestSuite struct {
 	path string
 }
 
+type TestDriver struct {
+	*test.TestSuite
+}
+
 func init() {
 	Suite(&TestSuite{})
+	Suite(&TestDriver{TestSuite: test.NewTestSuite("sql")})
+}
+
+func (this *TestDriver) SetUpTest(c *C) {
+	this.Config = make(Dictionary)
+	this.Config["dsn"] = getTemp(c) + ".db"
+	this.TestSuite.SetUpTest(c)
+}
+
+func (this *TestDriver) TearDownTest(c *C) {
+	path := this.Config["dsn"]
+	c.Logf("Removing %q", path)
+	os.Remove(path)
 }
 
 func getTemp(c *C) string {

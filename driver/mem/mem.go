@@ -1,9 +1,11 @@
 package mem
 
 import (
+	"bytes"
 	"code.google.com/p/go.text/collate"
 	"code.google.com/p/go.text/language"
 	"crypto/sha1"
+	"encoding/json"
 	"fmt"
 	"github.com/cznic/b"
 	. "github.com/flaub/kissdif"
@@ -16,7 +18,7 @@ import (
 type Driver struct {
 }
 
-type Environment struct {
+type Database struct {
 	name   string
 	config Dictionary
 	tables map[string]*Table
@@ -55,28 +57,28 @@ func NewDriver() *Driver {
 	return new(Driver)
 }
 
-func (this *Driver) Configure(name string, config Dictionary) (driver.Environment, *Error) {
-	env := &Environment{
+func (this *Driver) Configure(name string, config Dictionary) (driver.Database, *Error) {
+	db := &Database{
 		name:   name,
 		config: config,
 		tables: make(map[string]*Table),
 	}
-	return env, nil
+	return db, nil
 }
 
-func (this *Environment) Name() string {
+func (this *Database) Name() string {
 	return this.name
 }
 
-func (this *Environment) Driver() string {
+func (this *Database) Driver() string {
 	return "mem"
 }
 
-func (this *Environment) Config() Dictionary {
+func (this *Database) Config() Dictionary {
 	return this.config
 }
 
-func (this *Environment) GetTable(name string, create bool) (driver.Table, *Error) {
+func (this *Database) GetTable(name string, create bool) (driver.Table, *Error) {
 	if create {
 		this.mutex.Lock()
 		defer this.mutex.Unlock()
@@ -117,11 +119,18 @@ func newIndex(name string) *Index {
 }
 
 func (this *Table) Put(newRecord *Record) (string, *Error) {
+	var buf bytes.Buffer
+	err := json.NewEncoder(&buf).Encode(newRecord.Doc)
+	if err != nil {
+		return "", NewError(http.StatusInternalServerError, err.Error())
+	}
+	doc := buf.String()
+	hasher := sha1.New()
+	io.WriteString(hasher, doc)
+	rev := fmt.Sprintf("%x", hasher.Sum(nil))
+
 	this.mutex.Lock()
 	defer this.mutex.Unlock()
-	h := sha1.New()
-	io.WriteString(h, newRecord.Doc)
-	rev := fmt.Sprintf("%x", h.Sum(nil))
 	primary := this.getIndex("_id")
 	var record *Record
 	value, ok := primary.tree.Get(newRecord.Id)
@@ -131,10 +140,11 @@ func (this *Table) Put(newRecord *Record) (string, *Error) {
 			return "", NewError(http.StatusConflict, "Document update conflict")
 		}
 		this.removeKeys(record)
-		record.Doc = newRecord.Doc
+		record.Doc = doc
 		record.Keys = newRecord.Keys
 	} else {
 		record = newRecord
+		record.Doc = doc
 		primary.tree.Set(record.Id, record)
 	}
 	record.Rev = rev
@@ -158,7 +168,7 @@ func (this *Table) Delete(id string) *Error {
 
 func emit(query *Query, value interface{}, ch chan<- (*Record)) {
 	if query.Index == "_id" {
-		ch <- value.(*Record)
+		emit2(ch, value.(*Record))
 	} else {
 		node, ok := value.(*recordById)
 		if !ok {
@@ -166,9 +176,19 @@ func emit(query *Query, value interface{}, ch chan<- (*Record)) {
 		}
 		for _, v := range node.records {
 			// fmt.Printf("emit: %v\n", v)
-			ch <- v
+			emit2(ch, v)
 		}
 	}
+}
+
+func emit2(ch chan<- (*Record), record *Record) {
+	result := &Record{Id: record.Id, Rev: record.Rev, Keys: record.Keys}
+	buf := bytes.NewBufferString(record.Doc.(string))
+	err := json.NewDecoder(buf).Decode(&result.Doc)
+	if err != nil {
+		fmt.Printf("JSON decode failed: %v\n", err)
+	}
+	ch <- result
 }
 
 func (this *Table) Get(query *Query) (chan (*Record), *Error) {
@@ -191,10 +211,6 @@ func (this *Table) Get(query *Query) (chan (*Record), *Error) {
 	} else {
 		cur, _ = index.tree.SeekFirst()
 	}
-	// if cur == nil {
-	// 	this.mutex.RUnlock()
-	// 	return nil, NewError(http.StatusNotFound, "No records found")
-	// }
 	end := index.findEnd(query.Upper)
 	ch := make(chan (*Record))
 	go func() {
@@ -205,26 +221,24 @@ func (this *Table) Get(query *Query) (chan (*Record), *Error) {
 			ch <- nil
 			return
 		}
-		count := 0
+		var count uint = 0
 		for {
 			key, value, err := cur.Next()
-			// fmt.Printf("Enumerating: [%d] %v %v\n", i, key, err)
+			// fmt.Printf("Enumerating: [%d] %v %v\n", count, key, err)
 			if err == io.EOF || (end != nil && key == end.key) {
+				// fmt.Printf("EOF\n")
 				ch <- nil
 				return
 			}
 			if hit && key == query.Lower.Value && !query.Lower.Inclusive {
 				continue
 			}
-			emit(query, value, ch)
-			count++
 			if count == query.Limit {
-				_, _, err := cur.Next()
-				if err == io.EOF {
-					ch <- nil
-				}
+				// fmt.Printf("Reached limit\n")
 				return
 			}
+			emit(query, value, ch)
+			count++
 		}
 	}()
 	return ch, nil

@@ -3,29 +3,16 @@ package test
 import (
 	. "github.com/flaub/kissdif"
 	. "github.com/flaub/kissdif/driver"
-	_ "github.com/flaub/kissdif/driver/mem"
-	_ "github.com/flaub/kissdif/driver/sql"
-	"io/ioutil"
 	. "launchpad.net/gocheck"
 	"net/http"
-	"os"
-	"testing"
 )
 
 type TestSuite struct {
 	name   string
-	env    Environment
-	config Dictionary
+	db     Database
+	Config Dictionary
 	table  Table
 	c      *C
-}
-
-type TestDriverMemory struct {
-	TestSuite
-}
-
-type TestDriverSql struct {
-	TestSuite
 }
 
 type expectedQuery struct {
@@ -35,12 +22,8 @@ type expectedQuery struct {
 	expected []string
 }
 
-// Hook up gocheck into the "go test" runner.
-func Test(t *testing.T) { TestingT(t) }
-
-func init() {
-	Suite(&TestDriverMemory{TestSuite: TestSuite{name: "mem"}})
-	Suite(&TestDriverSql{TestSuite: TestSuite{name: "sql"}})
+func NewTestSuite(name string) *TestSuite {
+	return &TestSuite{name: name}
 }
 
 func (this *TestSuite) putValues(values ...string) {
@@ -66,7 +49,7 @@ func mb(value string, inclusive bool) *Bound {
 	return &Bound{inclusive, value}
 }
 
-func (this *TestSuite) expect(test expectedQuery, expectedEof bool, limit int) {
+func (this *TestSuite) expect(test expectedQuery, expectedEof bool, limit uint) {
 	query := &Query{
 		Limit: limit,
 		Index: test.index,
@@ -81,47 +64,28 @@ func (this *TestSuite) expect(test expectedQuery, expectedEof bool, limit int) {
 		if record == nil {
 			eof = true
 		} else {
-			actual = append(actual, record.Doc)
+			actual = append(actual, record.Doc.(string))
 		}
 	}
 	this.c.Check(actual, DeepEquals, test.expected, Commentf("Query: %v", query))
 	this.c.Check(eof, Equals, expectedEof, Commentf("Query: %v", query))
 }
 
-func (this *TestSuite) query(eof bool, limit int, set []expectedQuery) {
+func (this *TestSuite) query(eof bool, limit uint, set []expectedQuery) {
 	for _, test := range set {
 		this.expect(test, eof, limit)
 	}
 }
 
-func getTemp(c *C) string {
-	ftmp, err := ioutil.TempFile("", "")
-	c.Assert(err, IsNil)
-	defer ftmp.Close()
-	return ftmp.Name()
-}
-
 func (this *TestSuite) SetUpTest(c *C) {
-	db, err := Open(this.name)
+	drv, err := Open(this.name)
 	c.Assert(err, IsNil)
-	this.env, err = db.Configure("env", this.config)
+	this.db, err = drv.Configure("db", this.Config)
 	c.Assert(err, IsNil)
-	c.Assert(this.env, NotNil)
-	this.table, err = this.env.GetTable("table", true)
+	c.Assert(this.db, NotNil)
+	this.table, err = this.db.GetTable("table", true)
 	c.Assert(err, IsNil)
 	c.Assert(this.table, NotNil)
-}
-
-func (this *TestDriverSql) SetUpTest(c *C) {
-	this.config = make(Dictionary)
-	this.config["dsn"] = getTemp(c) + ".db"
-	this.TestSuite.SetUpTest(c)
-}
-
-func (this *TestDriverSql) TearDownTest(c *C) {
-	path := this.config["dsn"]
-	c.Logf("Removing %q", path)
-	os.Remove(path)
 }
 
 func (this *TestSuite) TestBasic(c *C) {
@@ -352,25 +316,25 @@ func (this *TestSuite) TestMVCC(c *C) {
 	this.c.Assert(prev, Not(Equals), "")
 
 	record = &Record{Id: "a", Doc: "a"}
-	rev, err := this.table.Put(record)
+	cur, err := this.table.Put(record)
+	this.c.Assert(cur, Equals, "")
 	this.c.Assert(err, NotNil)
 	this.c.Assert(err.Status, Equals, http.StatusConflict)
-	this.c.Assert(rev, Equals, "")
 
 	record = &Record{Id: "a", Rev: prev, Doc: "a"}
-	rev, err = this.table.Put(record)
+	cur, err = this.table.Put(record)
 	this.c.Assert(err, IsNil)
-	this.c.Assert(rev, Equals, prev)
+	this.c.Assert(cur, Equals, prev)
 
-	prev = rev
-	record = &Record{Id: "a", Rev: rev, Doc: "b"}
-	rev, err = this.table.Put(record)
+	prev = cur
+	record = &Record{Id: "a", Rev: cur, Doc: "b"}
+	cur, err = this.table.Put(record)
 	this.c.Assert(err, IsNil)
-	this.c.Assert(rev, Not(Equals), prev)
+	this.c.Assert(cur, Not(Equals), prev)
 
 	record = &Record{Id: "a", Rev: "xxx", Doc: "b"}
-	rev, err = this.table.Put(record)
+	cur, err = this.table.Put(record)
+	this.c.Assert(cur, Equals, "")
 	this.c.Assert(err, NotNil)
 	this.c.Assert(err.Status, Equals, http.StatusConflict)
-	this.c.Assert(rev, Equals, "")
 }
