@@ -1,6 +1,7 @@
 package rql
 
 import (
+	"github.com/flaub/ergo"
 	"github.com/flaub/kissdif"
 	"github.com/flaub/kissdif/driver"
 	"net/http"
@@ -30,7 +31,7 @@ func (this *localConn) putDb(name string, db driver.Database) {
 	this.dbs[name] = db
 }
 
-func (this *localConn) CreateDB(name, driverName string, config kissdif.Dictionary) (Database, *kissdif.Error) {
+func (this *localConn) CreateDB(name, driverName string, config kissdif.Dictionary) (Database, *ergo.Error) {
 	drv, err := driver.Open(driverName)
 	if err != nil {
 		return nil, err
@@ -43,11 +44,11 @@ func (this *localConn) CreateDB(name, driverName string, config kissdif.Dictiona
 	return newQuery(name), nil
 }
 
-func (this *localConn) DropDB(name string) *kissdif.Error {
+func (this *localConn) DropDB(name string) *ergo.Error {
 	return kissdif.NewError(http.StatusNotImplemented, "Not implemented")
 }
 
-func (this *localConn) get(impl queryImpl) (*kissdif.ResultSet, *kissdif.Error) {
+func (this *localConn) get(impl queryImpl) (*kissdif.ResultSet, *ergo.Error) {
 	db := this.getDb(impl.db)
 	if db == nil {
 		return nil, kissdif.NewError(http.StatusNotFound, "DB not found")
@@ -74,7 +75,7 @@ func (this *localConn) get(impl queryImpl) (*kissdif.ResultSet, *kissdif.Error) 
 	return result, nil
 }
 
-func (this *localConn) put(impl queryImpl) (string, *kissdif.Error) {
+func (this *localConn) put(impl queryImpl) (string, *ergo.Error) {
 	db := this.getDb(impl.db)
 	if db == nil {
 		return "", kissdif.NewError(http.StatusNotFound, "DB not found")
@@ -86,7 +87,7 @@ func (this *localConn) put(impl queryImpl) (string, *kissdif.Error) {
 	return table.Put(&impl.record)
 }
 
-func (this *localConn) delete(impl queryImpl) *kissdif.Error {
+func (this *localConn) delete(impl queryImpl) *ergo.Error {
 	db := this.getDb(impl.db)
 	if db == nil {
 		return kissdif.NewError(http.StatusNotFound, "DB not found")

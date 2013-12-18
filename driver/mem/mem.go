@@ -2,16 +2,14 @@ package mem
 
 import (
 	"bytes"
-	"code.google.com/p/go.text/collate"
-	"code.google.com/p/go.text/language"
 	"crypto/sha1"
 	"encoding/json"
 	"fmt"
 	"github.com/cznic/b"
+	"github.com/flaub/ergo"
 	. "github.com/flaub/kissdif"
 	"github.com/flaub/kissdif/driver"
 	"io"
-	"net/http"
 	"sync"
 )
 
@@ -44,20 +42,15 @@ type sentinel struct {
 	key string
 }
 
-var (
-	collator *collate.Collator
-)
-
 func init() {
 	driver.Register("mem", NewDriver())
-	collator = collate.New(language.En_US)
 }
 
 func NewDriver() *Driver {
 	return new(Driver)
 }
 
-func (this *Driver) Configure(name string, config Dictionary) (driver.Database, *Error) {
+func (this *Driver) Configure(name string, config Dictionary) (driver.Database, *ergo.Error) {
 	db := &Database{
 		name:   name,
 		config: config,
@@ -78,7 +71,7 @@ func (this *Database) Config() Dictionary {
 	return this.config
 }
 
-func (this *Database) GetTable(name string, create bool) (driver.Table, *Error) {
+func (this *Database) GetTable(name string, create bool) (driver.Table, *ergo.Error) {
 	if create {
 		this.mutex.Lock()
 		defer this.mutex.Unlock()
@@ -89,7 +82,7 @@ func (this *Database) GetTable(name string, create bool) (driver.Table, *Error) 
 	table, ok := this.tables[name]
 	if !ok {
 		if !create {
-			return nil, NewError(http.StatusNotFound, "Table not found")
+			return nil, NewError(EBadTable, "name", name)
 		}
 		// fmt.Printf("Creating new table: %v\n", name)
 		table = NewTable(name)
@@ -108,7 +101,14 @@ func NewTable(name string) *Table {
 }
 
 func cmp(a, b interface{}) int {
-	return collator.CompareString(a.(string), b.(string))
+	sa := a.(string)
+	sb := b.(string)
+	if sa < sb {
+		return -1
+	} else if sa > sb {
+		return 1
+	}
+	return 0
 }
 
 func newIndex(name string) *Index {
@@ -118,11 +118,11 @@ func newIndex(name string) *Index {
 	}
 }
 
-func (this *Table) Put(newRecord *Record) (string, *Error) {
+func (this *Table) Put(newRecord *Record) (string, *ergo.Error) {
 	var buf bytes.Buffer
 	err := json.NewEncoder(&buf).Encode(newRecord.Doc)
 	if err != nil {
-		return "", NewError(http.StatusInternalServerError, err.Error())
+		return "", Wrap(err)
 	}
 	doc := buf.String()
 	hasher := sha1.New()
@@ -137,7 +137,7 @@ func (this *Table) Put(newRecord *Record) (string, *Error) {
 	if ok {
 		record = value.(*Record)
 		if newRecord.Rev != record.Rev {
-			return "", NewError(http.StatusConflict, "Document update conflict")
+			return "", NewError(EConflict)
 		}
 		this.removeKeys(record)
 		record.Doc = doc
@@ -152,7 +152,7 @@ func (this *Table) Put(newRecord *Record) (string, *Error) {
 	return rev, nil
 }
 
-func (this *Table) Delete(id string) *Error {
+func (this *Table) Delete(id string) *ergo.Error {
 	this.mutex.Lock()
 	defer this.mutex.Unlock()
 	primary := this.getIndex("_id")
@@ -191,18 +191,18 @@ func emit2(ch chan<- (*Record), record *Record) {
 	ch <- result
 }
 
-func (this *Table) Get(query *Query) (chan (*Record), *Error) {
+func (this *Table) Get(query *Query) (chan (*Record), *ergo.Error) {
 	if query.Index == "" {
-		return nil, NewError(http.StatusBadRequest, "Invalid index")
+		return nil, NewError(EBadIndex, "name", query.Index)
 	}
 	if query.Limit == 0 {
-		return nil, NewError(http.StatusBadRequest, "Invalid limit")
+		return nil, NewError(EBadParam, "name", "limit", "value", query.Limit)
 	}
 	this.mutex.RLock()
 	index := this.getIndex(query.Index)
 	if index == nil {
 		this.mutex.RUnlock()
-		return nil, NewError(http.StatusNotFound, "Index not found")
+		return nil, NewError(EBadIndex, "name", query.Index)
 	}
 	var cur *b.Enumerator
 	var hit bool

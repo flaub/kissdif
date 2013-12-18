@@ -7,10 +7,10 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"github.com/flaub/ergo"
 	. "github.com/flaub/kissdif"
 	"github.com/flaub/kissdif/driver"
 	"io"
-	"net/http"
 	"strings"
 	"sync"
 	"text/template"
@@ -91,7 +91,7 @@ func NewDriver() *Driver {
 	return new(Driver)
 }
 
-func (this *Driver) Configure(name string, config Dictionary) (driver.Database, *Error) {
+func (this *Driver) Configure(name string, config Dictionary) (driver.Database, *ergo.Error) {
 	db := &Database{
 		name:   name,
 		config: config,
@@ -112,7 +112,7 @@ func (this *Database) Config() Dictionary {
 	return this.config
 }
 
-func (this *Database) GetTable(name string, create bool) (driver.Table, *Error) {
+func (this *Database) GetTable(name string, create bool) (driver.Table, *ergo.Error) {
 	if create {
 		this.mutex.Lock()
 		defer this.mutex.Unlock()
@@ -123,10 +123,10 @@ func (this *Database) GetTable(name string, create bool) (driver.Table, *Error) 
 	table, ok := this.tables[name]
 	if !ok {
 		if !create {
-			return nil, NewError(http.StatusNotFound, "Table not found")
+			return nil, NewError(EBadTable, "name", name)
 		}
 		// fmt.Printf("Creating new table: %v\n", name)
-		var err *Error
+		var err *ergo.Error
 		table, err = this.NewTable(name)
 		if err != nil {
 			return nil, err
@@ -136,15 +136,15 @@ func (this *Database) GetTable(name string, create bool) (driver.Table, *Error) 
 	return table, nil
 }
 
-func (this *Database) NewTable(name string) (*Table, *Error) {
+func (this *Database) NewTable(name string) (*Table, *ergo.Error) {
 	db, err := sql.Open("sqlite3", this.config["dsn"])
 	if err != nil {
-		return nil, NewError(http.StatusInternalServerError, err.Error())
+		return nil, Wrap(err)
 	}
 	defer db.Close()
 	_, err = db.Exec(compile(sqlSchema, name, ""))
 	if err != nil {
-		return nil, NewError(http.StatusInternalServerError, err.Error())
+		return nil, Wrap(err)
 	}
 	return &Table{name, this}, nil
 }
@@ -211,22 +211,22 @@ func (this *Table) prepareQuery(query *Query) (string, []interface{}) {
 	return compile(text, this.name, where), args
 }
 
-func (this *Table) Get(query *Query) (chan (*Record), *Error) {
+func (this *Table) Get(query *Query) (chan (*Record), *ergo.Error) {
 	if query.Index == "" {
-		return nil, NewError(http.StatusBadRequest, "Invalid index")
+		return nil, NewError(EBadIndex, "name", query.Index)
 	}
 	if query.Limit == 0 {
-		return nil, NewError(http.StatusBadRequest, "Invalid limit")
+		return nil, NewError(EBadParam, "name", "limit", "value", query.Limit)
 	}
 	db, err := sql.Open("sqlite3", this.db.config["dsn"])
 	if err != nil {
-		return nil, NewError(http.StatusInternalServerError, err.Error())
+		return nil, Wrap(err)
 	}
 	stmt, args := this.prepareQuery(query)
 	rows, err := db.Query(stmt, args...)
 	if err != nil {
 		db.Close()
-		return nil, NewError(http.StatusInternalServerError, err.Error())
+		return nil, Wrap(err)
 	}
 	ch := make(chan (*Record))
 	go func() {
@@ -272,11 +272,11 @@ func (this *referee) Close() {
 	}
 }
 
-func (this *Table) Put(record *Record) (string, *Error) {
+func (this *Table) Put(record *Record) (string, *ergo.Error) {
 	var buf bytes.Buffer
 	err := json.NewEncoder(&buf).Encode(record.Doc)
 	if err != nil {
-		return "", NewError(http.StatusInternalServerError, err.Error())
+		return "", Wrap(err)
 	}
 	doc := buf.String()
 	hasher := sha1.New()
@@ -284,37 +284,37 @@ func (this *Table) Put(record *Record) (string, *Error) {
 	rev := fmt.Sprintf("%x", hasher.Sum(nil))
 	db, err := sql.Open("sqlite3", this.db.config["dsn"])
 	if err != nil {
-		return "", NewError(http.StatusInternalServerError, err.Error())
+		return "", Wrap(err)
 	}
 	defer db.Close()
 	tx, err := db.Begin()
 	if err != nil {
-		return "", NewError(http.StatusInternalServerError, err.Error())
+		return "", Wrap(err)
 	}
 	ref := referee{tx: tx}
 	defer ref.Close()
 	if record.Rev == "" {
 		_, err = tx.Exec(compile(sqlRecordInsert, this.name, ""), record.Id, rev, doc)
 		if err != nil {
-			return "", NewError(http.StatusConflict, err.Error())
+			return "", NewError(EConflict, "err", err.Error())
 		}
 	} else {
 		result, err := tx.Exec(compile(sqlRecordUpdate, this.name, ""),
 			rev, doc, record.Id, record.Rev)
 		rows, err := result.RowsAffected()
 		if err != nil || rows != 1 {
-			return "", NewError(http.StatusConflict, "Document update conflict")
+			return "", NewError(EConflict)
 		}
 	}
 	_, err = tx.Exec(compile(sqlIndexDelete, this.name, ""), record.Id)
 	if err != nil {
-		return "", NewError(http.StatusInternalServerError, err.Error())
+		return "", Wrap(err)
 	}
 	for name, keys := range record.Keys {
 		for _, key := range keys {
 			_, err = tx.Exec(compile(sqlIndexAttach, this.name, ""), record.Id, name, key)
 			if err != nil {
-				return "", NewError(http.StatusInternalServerError, err.Error())
+				return "", Wrap(err)
 			}
 		}
 	}
@@ -323,25 +323,25 @@ func (this *Table) Put(record *Record) (string, *Error) {
 	return rev, nil
 }
 
-func (this *Table) Delete(id string) *Error {
+func (this *Table) Delete(id string) *ergo.Error {
 	db, err := sql.Open("sqlite3", this.db.config["dsn"])
 	if err != nil {
-		return NewError(http.StatusInternalServerError, err.Error())
+		return Wrap(err)
 	}
 	defer db.Close()
 	tx, err := db.Begin()
 	if err != nil {
-		return NewError(http.StatusInternalServerError, err.Error())
+		return Wrap(err)
 	}
 	ref := referee{tx: tx}
 	defer ref.Close()
 	_, err = tx.Exec(compile(sqlIndexDelete, this.name, ""), id)
 	if err != nil {
-		return NewError(http.StatusInternalServerError, err.Error())
+		return Wrap(err)
 	}
 	_, err = tx.Exec(compile(sqlRecordDelete, this.name, ""), id)
 	if err != nil {
-		return NewError(http.StatusInternalServerError, err.Error())
+		return Wrap(err)
 	}
 	ref.ok = true
 	return nil

@@ -2,6 +2,7 @@ package kissdif
 
 import (
 	"fmt"
+	"github.com/flaub/ergo"
 	"log"
 )
 
@@ -41,11 +42,6 @@ type Record struct {
 	Keys    IndexMap    `json:",omitempty"`
 }
 
-type Error struct {
-	Status  int
-	Message string
-}
-
 func NewRecord(id, rev string, doc interface{}) *Record {
 	return &Record{
 		Id:   id,
@@ -71,14 +67,6 @@ func NewQuery(index string, lower, upper *Bound, limit uint) *Query {
 func NewQueryEQ(index, key string, limit uint) *Query {
 	bound := &Bound{true, key}
 	return &Query{index, bound, bound, limit}
-}
-
-func NewError(status int, message string) *Error {
-	return &Error{status, message}
-}
-
-func (this *Error) Error() string {
-	return this.Message
 }
 
 func (this *ResultSet) String() string {
@@ -126,3 +114,50 @@ func (this *Query) String() string {
 }
 
 var _ = log.Printf
+
+const (
+	ENone = ergo.ErrCode(iota)
+	EGeneric
+	EMissingDriver
+	EConflict
+	EBadParam
+	EBadTable
+	EBadIndex
+	EBadQuery
+	EBadDatabase
+	EBadRouteVar
+	EBadRequest
+	ENotFound
+	EMultiple
+)
+
+var (
+	domain = "kissdif"
+	errors = ergo.DomainMap{
+		ENone:          "No error",
+		EGeneric:       "Generic error: {{.err}}",
+		EMissingDriver: "Missing driver '{{.name}}' (forgotten import?)",
+		EConflict:      "Document conflict",
+		EBadParam:      "Invalid parameter: {{.name}} = '{{.value}}'",
+		EBadTable:      "Table not found: '{{.name}}'",
+		EBadIndex:      "Index not found: '{{.name}}'",
+		EBadQuery:      "Invalid query",
+		EBadDatabase:   "Database not found: '{{.name}}'",
+		EBadRouteVar:   "Route variable not found: '{{.name}}'",
+		EBadRequest:    "Invalid request",
+		ENotFound:      "Record not found",
+		EMultiple:      "Multiple records found",
+	}
+)
+
+func init() {
+	ergo.Domain(domain, errors)
+}
+
+func NewError(code ergo.ErrCode, args ...interface{}) *ergo.Error {
+	return ergo.New(1, domain, code, args...)
+}
+
+func Wrap(err error) *ergo.Error {
+	return ergo.New(1, domain, EGeneric, "err", err.Error())
+}

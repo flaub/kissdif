@@ -1,11 +1,12 @@
 package rql
 
 import (
+	"github.com/flaub/ergo"
 	"github.com/flaub/kissdif"
 	_ "github.com/flaub/kissdif/driver/mem"
 	"github.com/flaub/kissdif/server"
+	"github.com/remogatto/prettytest"
 	. "launchpad.net/gocheck"
-	"net/http"
 	"net/http/httptest"
 	"testing"
 )
@@ -14,6 +15,7 @@ import (
 func Test(t *testing.T) { TestingT(t) }
 
 type TestSuite struct {
+	prettytest.Suite
 	conn Conn
 }
 
@@ -26,135 +28,133 @@ type TestLocalSuite struct {
 	TestSuite
 }
 
-func init() {
-	Suite(&TestHttpSuite{})
-	// Suite(&TestLocalSuite{})
+func TestRunner(t *testing.T) {
+	prettytest.Run(t,
+		new(TestHttpSuite),
+	)
 }
 
-func (this *TestHttpSuite) SetUpTest(c *C) {
+func (this *TestHttpSuite) Before() {
 	this.ts = httptest.NewServer(server.NewServer().Server.Handler)
-	var kerr *kissdif.Error
+	var kerr *ergo.Error
 	this.conn, kerr = Connect(this.ts.URL)
-	c.Assert(kerr, IsNil)
+	this.Nil(kerr)
 }
 
-func (this *TestHttpSuite) TearDownTest(c *C) {
+func (this *TestHttpSuite) After() {
 	this.ts.Close()
 }
 
-func (this *TestLocalSuite) SetUpTest(c *C) {
-	var kerr *kissdif.Error
+func (this *TestLocalSuite) Before() {
+	var kerr *ergo.Error
 	this.conn, kerr = Connect("local://")
-	c.Assert(kerr, IsNil)
+	this.Nil(kerr)
 }
 
 type testDoc struct {
 	Value string
 }
 
-func (this *TestSuite) TestBasic(c *C) {
+func (this *TestSuite) TestBasic() {
 	table := DB("db").Table("table")
 	_, kerr := table.Get("1").Exec(nil)
-	c.Assert(kerr.Status, Equals, http.StatusBadRequest)
-	c.Assert(kerr, ErrorMatches, "conn must not be null")
+	this.Equal(kissdif.EBadParam, kerr.Code)
 
 	db, kerr := this.conn.CreateDB("db", "mem", kissdif.Dictionary{})
-	c.Assert(kerr, IsNil)
-	c.Assert(db, NotNil)
+	this.Nil(kerr)
+	this.Check(db, NotNil)
 
 	_, kerr = table.Exec(this.conn)
-	c.Assert(kerr.Status, Equals, http.StatusNotFound)
-	// c.Assert(kerr, ErrorMatches, "Table not found")
+	this.Equal(kissdif.EBadTable, kerr.Code)
 
 	data := &testDoc{Value: "foo"}
 	rev, kerr := table.Insert("$", data).Exec(this.conn)
-	c.Assert(kerr, IsNil)
-	c.Assert(rev, Not(Equals), "")
+	this.Nil(kerr)
+	this.Not(this.Equal("", rev))
 
 	result, kerr := table.Get("$").Exec(this.conn)
-	c.Assert(kerr, IsNil)
-	c.Assert(result.Id(), Equals, "$")
+	this.Nil(kerr)
+	this.Equal("$", result.Id())
 	doc := result.MustScan(&testDoc{}).(*testDoc)
-	c.Assert(doc, DeepEquals, data)
+	this.Check(doc, DeepEquals, data)
 
 	kerr = table.Delete("$", rev).Exec(this.conn)
-	c.Assert(kerr, IsNil)
+	this.Nil(kerr)
 
 	result, kerr = table.Get("$").Exec(this.conn)
-	c.Assert(kerr.Status, Equals, http.StatusNotFound)
-	c.Assert(kerr, ErrorMatches, "Record not found")
+	this.Equal(kissdif.ENotFound, kerr.Code)
 }
 
-func (this *TestSuite) TestIndex(c *C) {
+func (this *TestSuite) TestIndex() {
 	table := DB("db").Table("table")
 	db, kerr := this.conn.CreateDB("db", "mem", kissdif.Dictionary{})
-	c.Assert(kerr, IsNil)
-	c.Assert(db, NotNil)
+	this.Nil(kerr)
+	this.Check(db, NotNil)
 
 	value := "Value"
 	rev, kerr := table.Insert("1", value).By("name", "Joe").By("name", "Bob").Exec(this.conn)
-	c.Assert(kerr, IsNil)
-	c.Assert(rev, Not(Equals), "")
+	this.Nil(kerr)
+	this.Not(this.Equal("", rev))
 
 	result, kerr := table.Get("1").Exec(this.conn)
-	c.Assert(kerr, IsNil)
+	this.Nil(kerr)
 	doc := ""
 	result.MustScan(&doc)
-	c.Assert(doc, Equals, value)
+	this.Equal(value, doc)
 
 	result, kerr = table.By("name").Get("Joe").Exec(this.conn)
-	c.Assert(kerr, IsNil)
+	this.Nil(kerr)
 	result.MustScan(&doc)
-	c.Assert(doc, Equals, value)
+	this.Equal(value, doc)
 
 	result, kerr = table.By("name").Get("Bob").Exec(this.conn)
-	c.Assert(kerr, IsNil)
+	this.Nil(kerr)
 	result.MustScan(&doc)
-	c.Assert(doc, Equals, value)
+	this.Equal(value, doc)
 
 	resultSet, kerr := table.By("name").Exec(this.conn)
-	c.Assert(kerr, IsNil)
-	c.Assert(resultSet.More, Equals, false)
-	c.Assert(resultSet.Records, HasLen, 2)
+	this.Nil(kerr)
+	this.False(resultSet.More)
+	this.Check(resultSet.Records, HasLen, 2)
 
 	// drop index (Bob)
 	rev, kerr = table.Update("1", rev, value).By("name", "Joe").Exec(this.conn)
-	c.Assert(kerr, IsNil)
-	c.Assert(rev, Not(Equals), "")
+	this.Nil(kerr)
+	this.Not(this.Equal("", rev))
 
 	result, kerr = table.By("name").Get("Joe").Exec(this.conn)
-	c.Assert(kerr, IsNil)
+	this.Nil(kerr)
 	result.MustScan(&doc)
-	c.Assert(doc, Equals, value)
+	this.Equal(value, doc)
 
 	// Bob should now be gone
 	result, kerr = table.By("name").Get("Bob").Exec(this.conn)
-	c.Assert(kerr, NotNil)
+	this.Not(this.Nil(kerr))
 
 	// use alternate UpdateRecord API
 	keys := make(kissdif.IndexMap)
 	keys["name"] = []string{"Joe", "Bob"}
 	rev, kerr = table.Insert("2", value).Keys(keys).Exec(this.conn)
-	c.Assert(kerr, IsNil)
-	c.Assert(rev, Not(Equals), "")
+	this.Nil(kerr)
+	this.Not(this.Equal("", rev))
 
 	record, kerr := table.Get("2").Exec(this.conn)
-	c.Assert(kerr, IsNil)
+	this.Nil(kerr)
 	record.MustScan(&doc)
-	c.Assert(doc, Equals, value)
+	this.Equal(value, doc)
 
 	record.MustSet("Other")
 	rev, kerr = table.UpdateRecord(record).Exec(this.conn)
-	c.Assert(kerr, IsNil)
-	c.Assert(rev, Not(Equals), "")
+	this.Nil(kerr)
+	this.Not(this.Equal("", rev))
 
 	record, kerr = table.Get("2").Exec(this.conn)
-	c.Assert(kerr, IsNil)
+	this.Nil(kerr)
 	record.MustScan(&doc)
-	c.Assert(doc, Equals, "Other")
+	this.Equal("Other", doc)
 }
 
-func (this *TestSuite) insert(c *C, key, value string, keys kissdif.IndexMap) string {
+func (this *TestSuite) insert(key, value string, keys kissdif.IndexMap) string {
 	table := DB("db").Table("table")
 	put := table.Insert(key, value)
 	for index, list := range keys {
@@ -163,98 +163,97 @@ func (this *TestSuite) insert(c *C, key, value string, keys kissdif.IndexMap) st
 		}
 	}
 	rev, kerr := put.Exec(this.conn)
-	c.Assert(kerr, IsNil)
-	c.Assert(rev, Not(Equals), "")
+	this.Nil(kerr)
+	this.Not(this.Equal("", rev))
 	return rev
 }
 
-func (this *TestSuite) TestQuery(c *C) {
+func (this *TestSuite) TestQuery() {
 	table := DB("db").Table("table")
 	db, kerr := this.conn.CreateDB("db", "mem", kissdif.Dictionary{})
-	c.Assert(kerr, IsNil)
-	c.Assert(db, NotNil)
+	this.Nil(kerr)
+	this.Check(db, NotNil)
 
-	this.insert(c, "1", "1", nil)
-	this.insert(c, "2", "2", kissdif.IndexMap{"name": []string{"Alice", "Carol"}})
-	this.insert(c, "3", "3", nil)
+	this.insert("1", "1", nil)
+	this.insert("2", "2", kissdif.IndexMap{"name": []string{"Alice", "Carol"}})
+	this.insert("3", "3", nil)
 
 	result, kerr := table.Get("2").Exec(this.conn)
-	c.Assert(kerr, IsNil)
+	this.Nil(kerr)
 	doc := ""
 	result.MustScan(&doc)
-	c.Assert(doc, Equals, "2")
+	this.Equal("2", doc)
 
 	rs, kerr := table.Between("3", "9").Exec(this.conn)
-	c.Assert(kerr, IsNil)
-	c.Assert(rs.More, Equals, false)
-	c.Assert(rs.Records, HasLen, 1)
+	this.Nil(kerr)
+	this.False(rs.More)
+	this.Check(rs.Records, HasLen, 1)
 	rs.Records[0].MustScan(&doc)
-	c.Assert(doc, Equals, "3")
+	this.Equal("3", doc)
 
 	rs, kerr = table.Between("2", "9").Exec(this.conn)
-	c.Assert(kerr, IsNil)
-	c.Assert(rs.More, Equals, false)
-	c.Assert(rs.Records, HasLen, 2)
+	this.Nil(kerr)
+	this.False(rs.More)
+	this.Check(rs.Records, HasLen, 2)
 	rs.Records[0].MustScan(&doc)
-	c.Assert(doc, Equals, "2")
+	this.Equal("2", doc)
 	rs.Records[1].MustScan(&doc)
-	c.Assert(doc, Equals, "3")
+	this.Equal("3", doc)
 
 	rs, kerr = table.Between("1", "3").Exec(this.conn)
-	c.Assert(kerr, IsNil)
-	c.Assert(rs.More, Equals, false)
-	c.Assert(rs.Records, HasLen, 2)
+	this.Nil(kerr)
+	this.False(rs.More)
+	this.Check(rs.Records, HasLen, 2)
 	rs.Records[0].MustScan(&doc)
-	c.Assert(doc, Equals, "1")
+	this.Equal("1", doc)
 	rs.Records[1].MustScan(&doc)
-	c.Assert(doc, Equals, "2")
+	this.Equal("2", doc)
 }
 
-func (this *TestSuite) TestPathLikeKey(c *C) {
+func (this *TestSuite) TestPathLikeKey() {
 	table := DB("db").Table("table")
 	db, kerr := this.conn.CreateDB("db", "mem", kissdif.Dictionary{})
-	c.Assert(kerr, IsNil)
-	c.Assert(db, NotNil)
+	this.Nil(kerr)
+	this.Check(db, NotNil)
 
 	data := &testDoc{Value: "foo"}
 	rev, kerr := table.Insert("/", data).Exec(this.conn)
-	c.Assert(kerr, IsNil)
-	c.Assert(rev, Not(Equals), "")
+	this.Nil(kerr)
+	this.Not(this.Equal("", rev))
 
 	result, kerr := table.Get("/").Exec(this.conn)
-	c.Assert(kerr, IsNil)
-	c.Assert(result.Id(), Equals, "/")
+	this.Nil(kerr)
+	this.Equal("/", result.Id())
 	doc := result.MustScan(&testDoc{})
-	c.Assert(doc, DeepEquals, data)
+	this.Check(doc, DeepEquals, data)
 
 	kerr = table.Delete("/", rev).Exec(this.conn)
-	c.Assert(kerr, IsNil)
+	this.Nil(kerr)
 
 	result, kerr = table.Get("/").Exec(this.conn)
-	c.Assert(kerr.Status, Equals, http.StatusNotFound)
-	c.Assert(kerr, ErrorMatches, "Record not found")
+	this.Equal(kissdif.ENotFound, kerr.Code)
 }
 
-func (this *TestSuite) TestUpdate(c *C) {
+func (this *TestSuite) TestUpdate() {
 	table := DB("db").Table("table")
 	db, kerr := this.conn.CreateDB("db", "mem", kissdif.Dictionary{})
-	c.Assert(kerr, IsNil)
-	c.Assert(db, NotNil)
+	this.Nil(kerr)
+	this.Check(db, NotNil)
 
 	data := &testDoc{Value: "foo"}
 	rev, kerr := table.Insert("/", data).Exec(this.conn)
-	c.Assert(kerr, IsNil)
-	c.Assert(rev, Not(Equals), "")
+	this.Nil(kerr)
+	this.Not(this.Equal("", rev))
 
 	data2 := &testDoc{Value: "bar"}
 	rev2, kerr := table.Update("/", rev, data2).Exec(this.conn)
-	c.Assert(kerr, IsNil)
-	c.Assert(rev2, Not(Equals), "")
-	c.Assert(rev2, Not(Equals), rev)
+	this.Nil(kerr)
+	this.Check(rev2, Not(Equals), "")
+	this.Check(rev2, Not(Equals), rev)
 
 	result, kerr := table.Get("/").Exec(this.conn)
-	c.Assert(kerr, IsNil)
-	c.Assert(result.Id(), Equals, "/")
+	this.Nil(kerr)
+	this.Check(result.Id(), Equals, "/")
 	doc := result.MustScan(&testDoc{})
-	c.Assert(doc, DeepEquals, data2)
+	this.Check(doc, DeepEquals, data2)
 }

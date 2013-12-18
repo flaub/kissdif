@@ -4,14 +4,13 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"github.com/flaub/ergo"
 	"github.com/flaub/kissdif"
 	"github.com/ugorji/go/codec"
 	"io"
-	"io/ioutil"
 	"net/http"
 	"net/url"
 	"strconv"
-	"strings"
 )
 
 var (
@@ -85,49 +84,44 @@ func (this *httpConn) makeUrl(impl queryImpl) string {
 		url.QueryEscape(impl.query.Index))
 }
 
-func (this *httpConn) sendRequest(method, url string, v interface{}) (*http.Response, *kissdif.Error) {
+func (this *httpConn) sendRequest(method, url string, v interface{}) (*http.Response, *ergo.Error) {
 	var buf bytes.Buffer
 	err := this.formatter.Encoder(&buf).Encode(v)
 	if err != nil {
-		msg := fmt.Sprintf("Encoder error: %v", err)
-		return nil, kissdif.NewError(http.StatusBadRequest, msg)
+		return nil, ergo.Wrap(err)
 	}
 	req, err := http.NewRequest(method, url, &buf)
 	if err != nil {
-		msg := fmt.Sprintf("Bad request: %v", err)
-		return nil, kissdif.NewError(http.StatusBadRequest, msg)
+		return nil, ergo.Wrap(err)
 	}
 	req.Header.Set("Content-Type", this.formatter.ContentType())
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
-		msg := fmt.Sprintf("Client error: %v", err)
-		return nil, kissdif.NewError(http.StatusBadRequest, msg)
+		return nil, ergo.Wrap(err)
 	}
 	return resp, nil
 }
 
-func (this *httpConn) recvReply(resp *http.Response, v interface{}) *kissdif.Error {
+func (this *httpConn) recvReply(resp *http.Response, v interface{}) *ergo.Error {
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		body, err := ioutil.ReadAll(resp.Body)
+		var erg ergo.Error
+		err := this.formatter.Decoder(resp.Body).Decode(&erg)
 		if err != nil {
-			msg := fmt.Sprintf("Body error: %v", err)
-			return kissdif.NewError(http.StatusBadRequest, msg)
+			return ergo.Wrap(err)
 		}
-		msg := fmt.Sprintf("Server error: %v", strings.TrimSpace(string(body)))
-		return kissdif.NewError(resp.StatusCode, msg)
+		return &erg
 	}
 	if v != nil {
 		err := this.formatter.Decoder(resp.Body).Decode(v)
 		if err != nil {
-			msg := fmt.Sprintf("Decoder error: %v", err)
-			return kissdif.NewError(http.StatusNotAcceptable, msg)
+			return ergo.Wrap(err)
 		}
 	}
 	return nil
 }
 
-func (this *httpConn) roundTrip(method, url string, in, out interface{}) *kissdif.Error {
+func (this *httpConn) roundTrip(method, url string, in, out interface{}) *ergo.Error {
 	resp, err := this.sendRequest(method, url, in)
 	if err != nil {
 		return err
@@ -135,7 +129,7 @@ func (this *httpConn) roundTrip(method, url string, in, out interface{}) *kissdi
 	return this.recvReply(resp, out)
 }
 
-func (this *httpConn) CreateDB(name, driverName string, config kissdif.Dictionary) (Database, *kissdif.Error) {
+func (this *httpConn) CreateDB(name, driverName string, config kissdif.Dictionary) (Database, *ergo.Error) {
 	url := fmt.Sprintf("%s/%s", this.baseUrl, name)
 	dbcfg := &kissdif.DatabaseCfg{
 		Name:   name,
@@ -149,14 +143,14 @@ func (this *httpConn) CreateDB(name, driverName string, config kissdif.Dictionar
 	return newQuery(name), nil
 }
 
-func (this *httpConn) DropDB(name string) *kissdif.Error {
-	return kissdif.NewError(http.StatusNotImplemented, "Not implemented")
+func (this *httpConn) DropDB(name string) *ergo.Error {
+	return ergo.Wrap("Not implemented")
 }
 
 func (this *httpConn) RegisterType(name string, doc interface{}) {
 }
 
-func (this *httpConn) get(impl queryImpl) (*ResultSet, *kissdif.Error) {
+func (this *httpConn) get(impl queryImpl) (*ResultSet, *ergo.Error) {
 	args := make(url.Values)
 	if impl.query.Limit != 0 {
 		args.Set("limit", strconv.Itoa(int(impl.query.Limit)))
@@ -189,7 +183,7 @@ func (this *httpConn) get(impl queryImpl) (*ResultSet, *kissdif.Error) {
 	return &result, nil
 }
 
-func (this *httpConn) put(impl queryImpl) (string, *kissdif.Error) {
+func (this *httpConn) put(impl queryImpl) (string, *ergo.Error) {
 	url := this.makeUrl(impl) + "/" + url.QueryEscape(impl.record.Id)
 	var rev string
 	kerr := this.roundTrip("PUT", url, impl.record, &rev)
@@ -199,7 +193,7 @@ func (this *httpConn) put(impl queryImpl) (string, *kissdif.Error) {
 	return rev, nil
 }
 
-func (this *httpConn) delete(impl queryImpl) *kissdif.Error {
+func (this *httpConn) delete(impl queryImpl) *ergo.Error {
 	url := this.makeUrl(impl) + "/" + url.QueryEscape(impl.record.Id)
 	return this.roundTrip("DELETE", url, nil, nil)
 }

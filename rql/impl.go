@@ -2,8 +2,8 @@ package rql
 
 import (
 	"encoding/json"
+	"github.com/flaub/ergo"
 	"github.com/flaub/kissdif"
-	"net/http"
 )
 
 type _Record struct {
@@ -157,7 +157,7 @@ func (this queryImpl) DeleteRecord(record Record) ExecStmt {
 	return deleteStmt{this}
 }
 
-func (this putStmt) Exec(conn Conn) (string, *kissdif.Error) {
+func (this putStmt) Exec(conn Conn) (string, *ergo.Error) {
 	return conn.put(this.queryImpl)
 }
 
@@ -179,17 +179,17 @@ func (this putStmt) By(key, value string) PutStmt {
 	return this
 }
 
-func (this deleteStmt) Exec(conn Conn) *kissdif.Error {
+func (this deleteStmt) Exec(conn Conn) *ergo.Error {
 	return conn.delete(this.queryImpl)
 }
 
-func (this queryImpl) Exec(conn Conn) (*ResultSet, *kissdif.Error) {
+func (this queryImpl) Exec(conn Conn) (*ResultSet, *ergo.Error) {
 	return conn.get(this)
 }
 
-func (this getStmt) Exec(conn Conn) (Record, *kissdif.Error) {
+func (this getStmt) Exec(conn Conn) (Record, *ergo.Error) {
 	if conn == nil {
-		return nil, kissdif.NewError(http.StatusBadRequest, "conn must not be null")
+		return nil, kissdif.NewError(kissdif.EBadParam, "name", "conn", "value", conn)
 	}
 	resultSet, err := conn.get(this.queryImpl)
 	if err != nil {
@@ -197,10 +197,10 @@ func (this getStmt) Exec(conn Conn) (Record, *kissdif.Error) {
 	}
 	// fmt.Printf("RS: %v\n", resultSet)
 	if resultSet.More || len(resultSet.Records) > 1 {
-		return nil, kissdif.NewError(http.StatusMultipleChoices, "Multiple records found")
+		return nil, kissdif.NewError(kissdif.EMultiple)
 	}
 	if len(resultSet.Records) == 0 {
-		return nil, kissdif.NewError(http.StatusNotFound, "Record not found")
+		return nil, kissdif.NewError(kissdif.ENotFound)
 	}
 	record := resultSet.Records[0]
 	return record, nil

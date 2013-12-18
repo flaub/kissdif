@@ -4,7 +4,6 @@ import (
 	. "github.com/flaub/kissdif"
 	. "github.com/flaub/kissdif/driver"
 	. "launchpad.net/gocheck"
-	"net/http"
 )
 
 type TestSuite struct {
@@ -92,13 +91,11 @@ func (this *TestSuite) TestBasic(c *C) {
 	this.c = c
 	query := &Query{}
 	_, err := this.table.Get(query)
-	c.Assert(err, ErrorMatches, "Invalid index")
-	c.Assert(err.Status, Equals, http.StatusBadRequest)
+	c.Assert(err.Code, Equals, EBadIndex)
 
 	query.Index = "_id"
 	_, err = this.table.Get(query)
-	c.Assert(err, ErrorMatches, "Invalid limit")
-	c.Assert(err.Status, Equals, http.StatusBadRequest)
+	c.Assert(err.Code, Equals, EBadParam)
 
 	query.Limit = 10
 	// query.Index = "_does_not_exist_"
@@ -319,7 +316,7 @@ func (this *TestSuite) TestMVCC(c *C) {
 	cur, err := this.table.Put(record)
 	this.c.Assert(cur, Equals, "")
 	this.c.Assert(err, NotNil)
-	this.c.Assert(err.Status, Equals, http.StatusConflict)
+	this.c.Assert(err.Code, Equals, EConflict)
 
 	record = &Record{Id: "a", Rev: prev, Doc: "a"}
 	cur, err = this.table.Put(record)
@@ -336,5 +333,5 @@ func (this *TestSuite) TestMVCC(c *C) {
 	cur, err = this.table.Put(record)
 	this.c.Assert(cur, Equals, "")
 	this.c.Assert(err, NotNil)
-	this.c.Assert(err.Status, Equals, http.StatusConflict)
+	this.c.Assert(err.Code, Equals, EConflict)
 }

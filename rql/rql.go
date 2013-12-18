@@ -1,6 +1,7 @@
 package rql
 
 import (
+	"github.com/flaub/ergo"
 	"github.com/flaub/kissdif"
 	"net/http"
 	_url "net/url"
@@ -24,11 +25,11 @@ type Record interface {
 }
 
 type Conn interface {
-	CreateDB(name, driver string, config kissdif.Dictionary) (Database, *kissdif.Error)
-	DropDB(name string) *kissdif.Error
-	get(query queryImpl) (*ResultSet, *kissdif.Error)
-	put(query queryImpl) (string, *kissdif.Error)
-	delete(query queryImpl) *kissdif.Error
+	CreateDB(name, driver string, config kissdif.Dictionary) (Database, *ergo.Error)
+	DropDB(name string) *ergo.Error
+	get(query queryImpl) (*ResultSet, *ergo.Error)
+	put(query queryImpl) (string, *ergo.Error)
+	delete(query queryImpl) *ergo.Error
 }
 
 type Database interface {
@@ -37,21 +38,21 @@ type Database interface {
 }
 
 type ExecStmt interface {
-	Exec(conn Conn) *kissdif.Error
+	Exec(conn Conn) *ergo.Error
 }
 
 type SingleStmt interface {
-	Exec(conn Conn) (Record, *kissdif.Error)
+	Exec(conn Conn) (Record, *ergo.Error)
 }
 
 type PutStmt interface {
-	Exec(conn Conn) (string, *kissdif.Error)
+	Exec(conn Conn) (string, *ergo.Error)
 	By(key, value string) PutStmt
 	Keys(keys kissdif.IndexMap) PutStmt
 }
 
 type MultiStmt interface {
-	Exec(conn Conn) (*ResultSet, *kissdif.Error)
+	Exec(conn Conn) (*ResultSet, *ergo.Error)
 }
 
 type Limitable interface {
@@ -80,7 +81,7 @@ type Table interface {
 	DeleteRecord(record Record) ExecStmt
 }
 
-func Connect(url string) (Conn, *kissdif.Error) {
+func Connect(url string) (Conn, *ergo.Error) {
 	theUrl, err := _url.Parse(url)
 	if err != nil {
 		return nil, kissdif.NewError(http.StatusBadRequest, err.Error())
