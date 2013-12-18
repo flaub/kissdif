@@ -8,6 +8,7 @@ import (
 	"github.com/flaub/kissdif"
 	"github.com/ugorji/go/codec"
 	"io"
+	_ "log"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -110,6 +111,12 @@ func (this *httpConn) recvReply(resp *http.Response, v interface{}) *ergo.Error 
 		if err != nil {
 			return ergo.Wrap(err)
 		}
+		if erg.Domain == "" {
+			if resp.StatusCode == http.StatusNotFound {
+				return kissdif.NewError(kissdif.ENotFound)
+			}
+			return ergo.Wrap("Blank response from server.", "code", resp.StatusCode)
+		}
 		return &erg
 	}
 	if v != nil {
@@ -184,6 +191,9 @@ func (this *httpConn) get(impl queryImpl) (*ResultSet, *ergo.Error) {
 }
 
 func (this *httpConn) put(impl queryImpl) (string, *ergo.Error) {
+	if impl.record.Id == "" {
+		return "", kissdif.NewError(kissdif.EBadParam, "name", "id", "value", impl.record.Id)
+	}
 	url := this.makeUrl(impl) + "/" + url.QueryEscape(impl.record.Id)
 	var rev string
 	kerr := this.roundTrip("PUT", url, impl.record, &rev)
