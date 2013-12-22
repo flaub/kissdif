@@ -2,7 +2,7 @@ package mem
 
 import (
 	"github.com/flaub/kissdif/driver/test"
-	. "launchpad.net/gocheck"
+	. "github.com/motain/gocheck"
 	"testing"
 )
 

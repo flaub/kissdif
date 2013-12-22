@@ -5,8 +5,7 @@ import (
 	"github.com/flaub/kissdif"
 	_ "github.com/flaub/kissdif/driver/mem"
 	"github.com/flaub/kissdif/server"
-	"github.com/remogatto/prettytest"
-	. "launchpad.net/gocheck"
+	. "github.com/motain/gocheck"
 	"net/http/httptest"
 	"testing"
 )
@@ -15,7 +14,6 @@ import (
 func Test(t *testing.T) { TestingT(t) }
 
 type TestSuite struct {
-	prettytest.Suite
 	conn Conn
 }
 
@@ -28,134 +26,133 @@ type TestLocalSuite struct {
 	TestSuite
 }
 
-func TestRunner(t *testing.T) {
-	prettytest.Run(t,
-		new(TestHttpSuite),
-	)
-}
+var (
+	// _ = Suite(new(TestLocalSuite))
+	_ = Suite(new(TestHttpSuite))
+)
 
-func (this *TestHttpSuite) Before() {
+func (this *TestHttpSuite) SetUpTest(c *C) {
 	this.ts = httptest.NewServer(server.NewServer().Server.Handler)
 	var kerr *ergo.Error
 	this.conn, kerr = Connect(this.ts.URL)
-	this.Nil(kerr)
+	c.Check(kerr, IsNil)
 }
 
-func (this *TestHttpSuite) After() {
+func (this *TestHttpSuite) TearDownTest(c *C) {
 	this.ts.Close()
 }
 
-func (this *TestLocalSuite) Before() {
+func (this *TestLocalSuite) SetUpTest(c *C) {
 	var kerr *ergo.Error
 	this.conn, kerr = Connect("local://")
-	this.Nil(kerr)
+	c.Check(kerr, IsNil)
 }
 
 type testDoc struct {
 	Value string
 }
 
-func (this *TestSuite) TestBasic() {
+func (this *TestSuite) TestBasic(c *C) {
 	table := DB("db").Table("table")
 	_, kerr := table.Get("1").Exec(nil)
-	this.Equal(kissdif.EBadParam, kerr.Code)
+	c.Check(kerr.Code, Equals, kissdif.EBadParam)
 
 	db, kerr := this.conn.CreateDB("db", "mem", kissdif.Dictionary{})
-	this.Nil(kerr)
-	this.Check(db, NotNil)
+	c.Check(kerr, IsNil)
+	c.Check(db, NotNil)
 
 	_, kerr = table.Exec(this.conn)
 	cause := ergo.Cause(kerr)
-	this.Equal(kissdif.EBadTable, cause.Code)
+	c.Check(cause.Code, Equals, kissdif.EBadTable)
 
 	data := &testDoc{Value: "foo"}
 	rev, kerr := table.Insert("$", data).Exec(this.conn)
-	this.Nil(kerr)
-	this.Not(this.Equal("", rev))
+	c.Check(kerr, IsNil)
+	c.Check(rev, Not(Equals), "")
 
 	result, kerr := table.Get("$").Exec(this.conn)
-	this.Nil(kerr)
-	this.Equal("$", result.Id())
+	c.Check(kerr, IsNil)
+	c.Check(result.Id(), Equals, "$")
 	doc := result.MustScan(&testDoc{}).(*testDoc)
-	this.Check(doc, DeepEquals, data)
+	c.Check(doc, DeepEquals, data)
 
 	kerr = table.Delete("$", rev).Exec(this.conn)
-	this.Nil(kerr)
+	c.Check(kerr, IsNil)
 
 	result, kerr = table.Get("$").Exec(this.conn)
-	this.Equal(kissdif.ENotFound, kerr.Code)
+	c.Check(kerr.Code, Equals, kissdif.ENotFound)
 }
 
-func (this *TestSuite) TestIndex() {
+func (this *TestSuite) TestIndex(c *C) {
 	table := DB("db").Table("table")
 	db, kerr := this.conn.CreateDB("db", "mem", kissdif.Dictionary{})
-	this.Nil(kerr)
-	this.Check(db, NotNil)
+	c.Check(kerr, IsNil)
+	c.Check(db, NotNil)
 
 	value := "Value"
 	rev, kerr := table.Insert("1", value).By("name", "Joe").By("name", "Bob").Exec(this.conn)
-	this.Nil(kerr)
-	this.Not(this.Equal("", rev))
+	c.Check(kerr, IsNil)
+	c.Check(rev, Not(Equals), "")
 
 	result, kerr := table.Get("1").Exec(this.conn)
-	this.Nil(kerr)
+	c.Check(kerr, IsNil)
 	doc := ""
 	result.MustScan(&doc)
-	this.Equal(value, doc)
+	c.Check(doc, Equals, value)
 
 	result, kerr = table.By("name").Get("Joe").Exec(this.conn)
-	this.Nil(kerr)
+	c.Check(kerr, IsNil)
 	result.MustScan(&doc)
-	this.Equal(value, doc)
+	c.Check(doc, Equals, value)
 
 	result, kerr = table.By("name").Get("Bob").Exec(this.conn)
-	this.Nil(kerr)
+	c.Check(kerr, IsNil)
 	result.MustScan(&doc)
-	this.Equal(value, doc)
+	c.Check(doc, Equals, value)
 
 	resultSet, kerr := table.By("name").Exec(this.conn)
-	this.Nil(kerr)
-	this.False(resultSet.More)
-	this.Check(resultSet.Records, HasLen, 2)
+	c.Check(kerr, IsNil)
+	c.Check(resultSet.More, Equals, false)
+	c.Check(resultSet.Records, HasLen, 2)
 
 	// drop index (Bob)
 	rev, kerr = table.Update("1", rev, value).By("name", "Joe").Exec(this.conn)
-	this.Nil(kerr)
-	this.Not(this.Equal("", rev))
+	c.Check(kerr, IsNil)
+	c.Check(rev, Not(Equals), "")
 
 	result, kerr = table.By("name").Get("Joe").Exec(this.conn)
-	this.Nil(kerr)
+	c.Check(kerr, IsNil)
 	result.MustScan(&doc)
-	this.Equal(value, doc)
+	c.Check(doc, Equals, value)
 
 	// Bob should now be gone
 	result, kerr = table.By("name").Get("Bob").Exec(this.conn)
-	this.Not(this.Nil(kerr))
+	c.Check(kerr, NotNil)
 
 	// use alternate UpdateRecord API
 	keys := make(kissdif.IndexMap)
 	keys["name"] = []string{"Joe", "Bob"}
 	rev, kerr = table.Insert("2", value).Keys(keys).Exec(this.conn)
-	this.Nil(kerr)
-	this.Not(this.Equal("", rev))
+	c.Check(kerr, IsNil)
+	c.Check(rev, Not(Equals), "")
 
 	record, kerr := table.Get("2").Exec(this.conn)
-	this.Nil(kerr)
+	c.Check(kerr, IsNil)
 	record.MustScan(&doc)
-	this.Equal(value, doc)
+	c.Check(doc, Equals, value)
 
 	record.MustSet("Other")
 	rev, kerr = table.UpdateRecord(record).Exec(this.conn)
-	this.Nil(kerr)
-	this.Not(this.Equal("", rev))
+	c.Check(kerr, IsNil)
+	c.Check(rev, Not(Equals), "")
 
 	record, kerr = table.Get("2").Exec(this.conn)
-	this.Nil(kerr)
+	c.Check(kerr, IsNil)
 	record.MustScan(&doc)
-	this.Equal("Other", doc)
+	c.Check(doc, Equals, "Other")
 }
 
-func (this *TestSuite) insert(key, value string, keys kissdif.IndexMap) string {
+func (this *TestSuite) insert(c *C, key, value string, keys kissdif.IndexMap) string {
 	table := DB("db").Table("table")
 	put := table.Insert(key, value)
 	for index, list := range keys {
@@ -164,97 +161,97 @@ func (this *TestSuite) insert(key, value string, keys kissdif.IndexMap) string {
 		}
 	}
 	rev, kerr := put.Exec(this.conn)
-	this.Nil(kerr)
-	this.Not(this.Equal("", rev))
+	c.Check(kerr, IsNil)
+	c.Check(rev, Not(Equals), "")
 	return rev
 }
 
-func (this *TestSuite) TestQuery() {
+func (this *TestSuite) TestQuery(c *C) {
 	table := DB("db").Table("table")
 	db, kerr := this.conn.CreateDB("db", "mem", kissdif.Dictionary{})
-	this.Nil(kerr)
-	this.Check(db, NotNil)
+	c.Check(kerr, IsNil)
+	c.Check(db, NotNil)
 
-	this.insert("1", "1", nil)
-	this.insert("2", "2", kissdif.IndexMap{"name": []string{"Alice", "Carol"}})
-	this.insert("3", "3", nil)
+	this.insert(c, "1", "1", nil)
+	this.insert(c, "2", "2", kissdif.IndexMap{"name": []string{"Alice", "Carol"}})
+	this.insert(c, "3", "3", nil)
 
 	result, kerr := table.Get("2").Exec(this.conn)
-	this.Nil(kerr)
+	c.Check(kerr, IsNil)
 	doc := ""
 	result.MustScan(&doc)
-	this.Equal("2", doc)
+	c.Check(doc, Equals, "2")
 
 	rs, kerr := table.Between("3", "9").Exec(this.conn)
-	this.Nil(kerr)
-	this.False(rs.More)
-	this.Check(rs.Records, HasLen, 1)
+	c.Check(kerr, IsNil)
+	c.Check(rs.More, Equals, false)
+	c.Check(rs.Records, HasLen, 1)
 	rs.Records[0].MustScan(&doc)
-	this.Equal("3", doc)
+	c.Check(doc, Equals, "3")
 
 	rs, kerr = table.Between("2", "9").Exec(this.conn)
-	this.Nil(kerr)
-	this.False(rs.More)
-	this.Check(rs.Records, HasLen, 2)
+	c.Check(kerr, IsNil)
+	c.Check(rs.More, Equals, false)
+	c.Check(rs.Records, HasLen, 2)
 	rs.Records[0].MustScan(&doc)
-	this.Equal("2", doc)
+	c.Check(doc, Equals, "2")
 	rs.Records[1].MustScan(&doc)
-	this.Equal("3", doc)
+	c.Check(doc, Equals, "3")
 
 	rs, kerr = table.Between("1", "3").Exec(this.conn)
-	this.Nil(kerr)
-	this.False(rs.More)
-	this.Check(rs.Records, HasLen, 2)
+	c.Check(kerr, IsNil)
+	c.Check(rs.More, Equals, false)
+	c.Check(rs.Records, HasLen, 2)
 	rs.Records[0].MustScan(&doc)
-	this.Equal("1", doc)
+	c.Check(doc, Equals, "1")
 	rs.Records[1].MustScan(&doc)
-	this.Equal("2", doc)
+	c.Check(doc, Equals, "2")
 }
 
-func (this *TestSuite) TestPathLikeKey() {
+func (this *TestSuite) TestPathLikeKey(c *C) {
 	table := DB("db").Table("table")
 	db, kerr := this.conn.CreateDB("db", "mem", kissdif.Dictionary{})
-	this.Nil(kerr)
-	this.Check(db, NotNil)
+	c.Check(kerr, IsNil)
+	c.Check(db, NotNil)
 
 	data := &testDoc{Value: "foo"}
 	rev, kerr := table.Insert("/", data).Exec(this.conn)
-	this.Nil(kerr)
-	this.Not(this.Equal("", rev))
+	c.Check(kerr, IsNil)
+	c.Check(rev, Not(Equals), "")
 
 	result, kerr := table.Get("/").Exec(this.conn)
-	this.Nil(kerr)
-	this.Equal("/", result.Id())
+	c.Check(kerr, IsNil)
+	c.Check(result.Id(), Equals, "/")
 	doc := result.MustScan(&testDoc{})
-	this.Check(doc, DeepEquals, data)
+	c.Check(doc, DeepEquals, data)
 
 	kerr = table.Delete("/", rev).Exec(this.conn)
-	this.Nil(kerr)
+	c.Check(kerr, IsNil)
 
 	result, kerr = table.Get("/").Exec(this.conn)
-	this.Equal(kissdif.ENotFound, kerr.Code)
+	c.Check(kerr.Code, Equals, kissdif.ENotFound)
 }
 
-func (this *TestSuite) TestUpdate() {
+func (this *TestSuite) TestUpdate(c *C) {
 	table := DB("db").Table("table")
 	db, kerr := this.conn.CreateDB("db", "mem", kissdif.Dictionary{})
-	this.Nil(kerr)
-	this.Check(db, NotNil)
+	c.Check(kerr, IsNil)
+	c.Check(db, NotNil)
 
 	data := &testDoc{Value: "foo"}
 	rev, kerr := table.Insert("/", data).Exec(this.conn)
-	this.Nil(kerr)
-	this.Not(this.Equal("", rev))
+	c.Check(kerr, IsNil)
+	c.Check(rev, Not(Equals), "")
 
 	data2 := &testDoc{Value: "bar"}
 	rev2, kerr := table.Update("/", rev, data2).Exec(this.conn)
-	this.Nil(kerr)
-	this.Check(rev2, Not(Equals), "")
-	this.Check(rev2, Not(Equals), rev)
+	c.Check(kerr, IsNil)
+	c.Check(rev2, Not(Equals), "")
+	c.Check(rev2, Not(Equals), rev)
 
 	result, kerr := table.Get("/").Exec(this.conn)
-	this.Nil(kerr)
-	this.Check(result.Id(), Equals, "/")
+	c.Check(kerr, IsNil)
+	c.Check(result.Id(), Equals, "/")
 	doc := result.MustScan(&testDoc{})
-	this.Check(doc, DeepEquals, data2)
+	c.Check(doc, DeepEquals, data2)
 }

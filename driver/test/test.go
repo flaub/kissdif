@@ -3,7 +3,7 @@ package test
 import (
 	. "github.com/flaub/kissdif"
 	. "github.com/flaub/kissdif/driver"
-	. "launchpad.net/gocheck"
+	. "github.com/motain/gocheck"
 )
 
 type TestSuite struct {
