@@ -206,7 +206,7 @@ func (this *Table) Get(query *Query) (chan (*Record), *ergo.Error) {
 	}
 	var cur *b.Enumerator
 	var hit bool
-	if query.Lower != nil {
+	if query.Lower.IsDefined() {
 		cur, hit = index.tree.Seek(query.Lower.Value)
 	} else {
 		cur, _ = index.tree.SeekFirst()
@@ -252,8 +252,8 @@ func (this *Table) getIndex(name string) *Index {
 	return index
 }
 
-func (this *Index) findEnd(upper *Bound) *sentinel {
-	if upper == nil {
+func (this *Index) findEnd(upper Bound) *sentinel {
+	if !upper.IsDefined() {
 		return nil
 	}
 	cursor, hit := this.tree.Seek(upper.Value)

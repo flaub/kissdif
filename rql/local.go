@@ -48,16 +48,16 @@ func (this *localConn) DropDB(name string) *ergo.Error {
 	return kissdif.NewError(http.StatusNotImplemented, "Not implemented")
 }
 
-func (this *localConn) get(impl queryImpl) (*kissdif.ResultSet, *ergo.Error) {
-	db := this.getDb(impl.db)
+func (this *localConn) Get(impl QueryImpl) (*kissdif.ResultSet, *ergo.Error) {
+	db := this.getDb(impl.Db_)
 	if db == nil {
 		return nil, kissdif.NewError(http.StatusNotFound, "DB not found")
 	}
-	table, err := db.GetTable(impl.table, false)
+	table, err := db.GetTable(impl.Table_, false)
 	if err != nil {
 		return nil, err
 	}
-	ch, err := table.Get(&impl.query)
+	ch, err := table.Get(&impl.Query_)
 	if err != nil {
 		return nil, err
 	}
@@ -75,26 +75,26 @@ func (this *localConn) get(impl queryImpl) (*kissdif.ResultSet, *ergo.Error) {
 	return result, nil
 }
 
-func (this *localConn) put(impl queryImpl) (string, *ergo.Error) {
-	db := this.getDb(impl.db)
+func (this *localConn) Put(impl QueryImpl) (string, *ergo.Error) {
+	db := this.getDb(impl.Db_)
 	if db == nil {
 		return "", kissdif.NewError(http.StatusNotFound, "DB not found")
 	}
-	table, err := db.GetTable(impl.table, true)
+	table, err := db.GetTable(impl.Table_, true)
 	if err != nil {
 		return "", err
 	}
-	return table.Put(&impl.record)
+	return table.Put(&impl.Record_)
 }
 
-func (this *localConn) delete(impl queryImpl) *ergo.Error {
-	db := this.getDb(impl.db)
+func (this *localConn) Delete(impl QueryImpl) *ergo.Error {
+	db := this.getDb(impl.Db_)
 	if db == nil {
 		return kissdif.NewError(http.StatusNotFound, "DB not found")
 	}
-	table, err := db.GetTable(impl.table, false)
+	table, err := db.GetTable(impl.Table_, false)
 	if err != nil {
 		return err
 	}
-	return table.Delete(impl.record.Id)
+	return table.Delete(impl.Record_.Id)
 }

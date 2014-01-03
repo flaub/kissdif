@@ -2,8 +2,6 @@ package kissdif
 
 import (
 	"fmt"
-	"github.com/flaub/ergo"
-	"log"
 )
 
 type Dictionary map[string]string
@@ -25,10 +23,14 @@ type Bound struct {
 	Value     string
 }
 
+func (this Bound) IsDefined() bool {
+	return this.Value != ""
+}
+
 type Query struct {
 	Index string
-	Lower *Bound
-	Upper *Bound
+	Lower Bound
+	Upper Bound
 	Limit uint
 }
 
@@ -56,16 +58,47 @@ func (this *Record) AddKey(name, value string) *Record {
 	if !ok {
 		index = []string{}
 	}
+	// ignore duplicates
+	for _, v := range index {
+		if v == value {
+			return this
+		}
+	}
 	this.Keys[name] = append(index, value)
 	return this
 }
 
-func NewQuery(index string, lower, upper *Bound, limit uint) *Query {
+func (this *Record) DropKey(name, value string) *Record {
+	this.Keys.drop(name, value)
+	return this
+}
+
+func (this IndexMap) drop(name, value string) {
+	index, ok := this[name]
+	if !ok {
+		return
+	}
+	for i, v := range index {
+		if v == value {
+			index[i], index = index[len(index)-1], index[:len(index)-1]
+		}
+	}
+}
+
+func (this IndexMap) Clone() IndexMap {
+	keys := make(IndexMap)
+	for k, v := range this {
+		keys[k] = v
+	}
+	return keys
+}
+
+func NewQuery(index string, lower, upper Bound, limit uint) *Query {
 	return &Query{index, lower, upper, limit}
 }
 
 func NewQueryEQ(index, key string, limit uint) *Query {
-	bound := &Bound{true, key}
+	bound := Bound{true, key}
 	return &Query{index, bound, bound, limit}
 }
 
@@ -93,7 +126,7 @@ func (this *ResultSet) String() string {
 
 func (this *Query) String() string {
 	str := fmt.Sprintf("[%d] ", this.Limit)
-	if this.Lower != nil {
+	if this.Lower.IsDefined() {
 		str += this.Lower.Value
 		if this.Lower.Inclusive {
 			str += " <= "
@@ -102,7 +135,7 @@ func (this *Query) String() string {
 		}
 	}
 	str += this.Index
-	if this.Upper != nil {
+	if this.Upper.IsDefined() {
 		if this.Upper.Inclusive {
 			str += " <= "
 		} else {
@@ -111,53 +144,4 @@ func (this *Query) String() string {
 		str += this.Upper.Value
 	}
 	return str
-}
-
-var _ = log.Printf
-
-const (
-	ENone = ergo.ErrCode(iota)
-	EGeneric
-	EMissingDriver
-	EConflict
-	EBadParam
-	EBadTable
-	EBadIndex
-	EBadQuery
-	EBadDatabase
-	EBadRouteVar
-	EBadRequest
-	ENotFound
-	EMultiple
-)
-
-var (
-	domain = "kissdif"
-	errors = ergo.DomainMap{
-		ENone:          "No error",
-		EGeneric:       "Generic error: {{.err}}",
-		EMissingDriver: "Missing driver '{{.name}}' (forgotten import?)",
-		EConflict:      "Document conflict",
-		EBadParam:      "Invalid parameter: {{.name}} = '{{.value}}'",
-		EBadTable:      "Table not found: '{{.name}}'",
-		EBadIndex:      "Index not found: '{{.name}}'",
-		EBadQuery:      "Invalid query",
-		EBadDatabase:   "Database not found: '{{.name}}'",
-		EBadRouteVar:   "Route variable not found: '{{.name}}'",
-		EBadRequest:    "Invalid request",
-		ENotFound:      "Record not found",
-		EMultiple:      "Multiple records found",
-	}
-)
-
-func init() {
-	ergo.Domain(domain, errors)
-}
-
-func NewError(code ergo.ErrCode, args ...interface{}) *ergo.Error {
-	return ergo.New(1, domain, code, args...)
-}
-
-func Wrap(err error) *ergo.Error {
-	return ergo.New(1, domain, EGeneric, "err", err.Error())
 }

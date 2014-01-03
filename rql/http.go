@@ -77,12 +77,12 @@ func newHttpConn(url string) *httpConn {
 	}
 }
 
-func (this *httpConn) makeUrl(impl queryImpl) string {
+func (this *httpConn) makeUrl(impl QueryImpl) string {
 	return fmt.Sprintf("%s/%s/%s/%s",
 		this.baseUrl,
-		url.QueryEscape(impl.db),
-		url.QueryEscape(impl.table),
-		url.QueryEscape(impl.query.Index))
+		url.QueryEscape(impl.Db_),
+		url.QueryEscape(impl.Table_),
+		url.QueryEscape(impl.Query_.Index))
 }
 
 func (this *httpConn) sendRequest(method, url string, v interface{}) (*http.Response, *ergo.Error) {
@@ -157,32 +157,33 @@ func (this *httpConn) DropDB(name string) *ergo.Error {
 func (this *httpConn) RegisterType(name string, doc interface{}) {
 }
 
-func (this *httpConn) get(impl queryImpl) (*ResultSet, *ergo.Error) {
+func (this *httpConn) Get(impl QueryImpl) (ResultSet, *ergo.Error) {
 	args := make(url.Values)
-	if impl.query.Limit != 0 {
-		args.Set("limit", strconv.Itoa(int(impl.query.Limit)))
+	query := impl.Query_
+	if query.Limit != 0 {
+		args.Set("limit", strconv.Itoa(int(query.Limit)))
 	}
-	if impl.query.Lower != nil && impl.query.Upper != nil &&
-		impl.query.Lower.Value == impl.query.Upper.Value {
-		args.Set("eq", impl.query.Lower.Value)
+	if query.Lower.IsDefined() && query.Upper.IsDefined() &&
+		query.Lower.Value == query.Upper.Value {
+		args.Set("eq", query.Lower.Value)
 	} else {
-		if impl.query.Lower != nil {
-			if impl.query.Lower.Inclusive {
-				args.Set("ge", impl.query.Lower.Value)
+		if query.Lower.IsDefined() {
+			if query.Lower.Inclusive {
+				args.Set("ge", query.Lower.Value)
 			} else {
-				args.Set("gt", impl.query.Lower.Value)
+				args.Set("gt", query.Lower.Value)
 			}
 		}
-		if impl.query.Upper != nil {
-			if impl.query.Upper.Inclusive {
-				args.Set("le", impl.query.Upper.Value)
+		if query.Upper.IsDefined() {
+			if query.Upper.Inclusive {
+				args.Set("le", query.Upper.Value)
 			} else {
-				args.Set("lt", impl.query.Upper.Value)
+				args.Set("lt", query.Upper.Value)
 			}
 		}
 	}
 	url := this.makeUrl(impl) + "?" + args.Encode()
-	var result ResultSet
+	var result ResultSetImpl
 	kerr := this.roundTrip("GET", url, nil, &result)
 	if kerr != nil {
 		return nil, kerr
@@ -190,20 +191,21 @@ func (this *httpConn) get(impl queryImpl) (*ResultSet, *ergo.Error) {
 	return &result, nil
 }
 
-func (this *httpConn) put(impl queryImpl) (string, *ergo.Error) {
-	if impl.record.Id == "" {
-		return "", kissdif.NewError(kissdif.EBadParam, "name", "id", "value", impl.record.Id)
+func (this *httpConn) Put(impl QueryImpl) (string, *ergo.Error) {
+	record := impl.Record_
+	if record.Id == "" {
+		return "", kissdif.NewError(kissdif.EBadParam, "name", "id", "value", record.Id)
 	}
-	url := this.makeUrl(impl) + "/" + url.QueryEscape(impl.record.Id)
+	url := this.makeUrl(impl) + "/" + url.QueryEscape(record.Id)
 	var rev string
-	kerr := this.roundTrip("PUT", url, impl.record, &rev)
+	kerr := this.roundTrip("PUT", url, record, &rev)
 	if kerr != nil {
 		return "", kerr
 	}
 	return rev, nil
 }
 
-func (this *httpConn) delete(impl queryImpl) *ergo.Error {
-	url := this.makeUrl(impl) + "/" + url.QueryEscape(impl.record.Id)
+func (this *httpConn) Delete(impl QueryImpl) *ergo.Error {
+	url := this.makeUrl(impl) + "/" + url.QueryEscape(impl.Record_.Id)
 	return this.roundTrip("DELETE", url, nil, nil)
 }

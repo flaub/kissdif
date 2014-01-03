@@ -7,9 +7,17 @@ import (
 	_url "net/url"
 )
 
-type ResultSet struct {
-	More    bool
-	Records []*_Record
+type ResultSet interface {
+	More() bool
+	Count() int
+	Reader() RecordReader
+}
+
+type RecordReader interface {
+	Next() bool
+	Record() Record
+	Scan(into interface{}) (interface{}, error)
+	MustScan(into interface{}) interface{}
 }
 
 type Record interface {
@@ -27,9 +35,9 @@ type Record interface {
 type Conn interface {
 	CreateDB(name, driver string, config kissdif.Dictionary) (Database, *ergo.Error)
 	DropDB(name string) *ergo.Error
-	get(query queryImpl) (*ResultSet, *ergo.Error)
-	put(query queryImpl) (string, *ergo.Error)
-	delete(query queryImpl) *ergo.Error
+	Get(impl QueryImpl) (ResultSet, *ergo.Error)
+	Put(impl QueryImpl) (string, *ergo.Error)
+	Delete(impl QueryImpl) *ergo.Error
 }
 
 type Database interface {
@@ -52,7 +60,7 @@ type PutStmt interface {
 }
 
 type MultiStmt interface {
-	Exec(conn Conn) (*ResultSet, *ergo.Error)
+	Exec(conn Conn) (ResultSet, *ergo.Error)
 }
 
 type Limitable interface {
@@ -98,31 +106,4 @@ func Connect(url string) (Conn, *ergo.Error) {
 
 func DB(name string) Database {
 	return newQuery(name)
-}
-
-type RecordReader struct {
-	records []*_Record
-	index   int
-}
-
-func (this *ResultSet) Reader() *RecordReader {
-	return &RecordReader{records: this.Records}
-}
-
-func (this *RecordReader) Next() bool {
-	if this.index == len(this.records) {
-		return false
-	}
-	this.index++
-	return true
-}
-
-func (this *RecordReader) Scan(into interface{}) (interface{}, error) {
-	record := this.records[this.index]
-	return record.Scan(into)
-}
-
-func (this *RecordReader) MustScan(into interface{}) interface{} {
-	record := this.records[this.index]
-	return record.MustScan(into)
 }

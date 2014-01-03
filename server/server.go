@@ -341,11 +341,11 @@ func getLimit(args url.Values) (uint, *ergo.Error) {
 	return uint(limit), nil
 }
 
-func getBounds(args url.Values) (lower, upper *Bound, err *ergo.Error) {
+func getBounds(args url.Values) (lower, upper Bound, err *ergo.Error) {
 	for k, v := range args {
 		switch k {
 		case "eq":
-			if lower != nil || upper != nil {
+			if lower.IsDefined() || upper.IsDefined() {
 				err = NewError(EBadQuery)
 				return
 			}
@@ -353,11 +353,11 @@ func getBounds(args url.Values) (lower, upper *Bound, err *ergo.Error) {
 				err = NewError(EBadQuery)
 				return
 			}
-			lower = &Bound{true, v[0]}
-			upper = &Bound{true, v[0]}
+			lower = Bound{true, v[0]}
+			upper = Bound{true, v[0]}
 			break
 		case "lt":
-			if upper != nil {
+			if upper.IsDefined() {
 				err = NewError(EBadQuery)
 				return
 			}
@@ -365,10 +365,10 @@ func getBounds(args url.Values) (lower, upper *Bound, err *ergo.Error) {
 				err = NewError(EBadQuery)
 				return
 			}
-			upper = &Bound{false, v[0]}
+			upper = Bound{false, v[0]}
 			break
 		case "le":
-			if upper != nil {
+			if upper.IsDefined() {
 				err = NewError(EBadQuery)
 				return
 			}
@@ -376,10 +376,10 @@ func getBounds(args url.Values) (lower, upper *Bound, err *ergo.Error) {
 				err = NewError(EBadQuery)
 				return
 			}
-			upper = &Bound{true, v[0]}
+			upper = Bound{true, v[0]}
 			break
 		case "gt":
-			if lower != nil {
+			if lower.IsDefined() {
 				err = NewError(EBadQuery)
 				return
 			}
@@ -387,10 +387,10 @@ func getBounds(args url.Values) (lower, upper *Bound, err *ergo.Error) {
 				err = NewError(EBadQuery)
 				return
 			}
-			lower = &Bound{false, v[0]}
+			lower = Bound{false, v[0]}
 			break
 		case "ge":
-			if lower != nil {
+			if lower.IsDefined() {
 				err = NewError(EBadQuery)
 				return
 			}
@@ -398,7 +398,7 @@ func getBounds(args url.Values) (lower, upper *Bound, err *ergo.Error) {
 				err = NewError(EBadQuery)
 				return
 			}
-			lower = &Bound{true, v[0]}
+			lower = Bound{true, v[0]}
 			break
 		}
 	}

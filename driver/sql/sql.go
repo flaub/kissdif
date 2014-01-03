@@ -171,12 +171,12 @@ func (this *Table) where(query *Query) (string, []interface{}) {
 		args = append(args, query.Index)
 		selector = "i.value"
 	}
-	if query.Lower != nil && query.Upper != nil &&
+	if query.Lower.IsDefined() && query.Upper.IsDefined() &&
 		query.Lower.Value == query.Upper.Value {
 		exprs = append(exprs, selector+" = ?")
 		args = append(args, query.Lower.Value)
 	} else {
-		if query.Lower != nil {
+		if query.Lower.IsDefined() {
 			if query.Lower.Inclusive {
 				exprs = append(exprs, selector+" >= ?")
 			} else {
@@ -184,7 +184,7 @@ func (this *Table) where(query *Query) (string, []interface{}) {
 			}
 			args = append(args, query.Lower.Value)
 		}
-		if query.Upper != nil {
+		if query.Upper.IsDefined() {
 			if query.Upper.Inclusive {
 				exprs = append(exprs, selector+" <= ?")
 			} else {
