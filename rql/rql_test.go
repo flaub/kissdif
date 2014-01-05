@@ -266,3 +266,72 @@ func (this *TestSuite) TestUpdate(c *C) {
 	doc := result.MustScan(&testDoc{})
 	c.Check(doc, DeepEquals, data2)
 }
+
+func (this *TestSuite) TestUpdateRecord(c *C) {
+	table := DB("db").Table("table")
+	db, kerr := this.conn.CreateDB("db", "mem", kissdif.Dictionary{})
+	c.Check(kerr, IsNil)
+	c.Check(db, NotNil)
+
+	data := &testDoc{Value: "foo"}
+	rev, kerr := table.Insert("/", data).Exec(this.conn)
+	c.Check(kerr, IsNil)
+	c.Check(rev, Not(Equals), "")
+
+	record, kerr := table.Get("/").Exec(this.conn)
+	c.Check(kerr, IsNil)
+	c.Check(record, NotNil)
+	var doc testDoc
+	record.MustScan(&doc)
+	doc.Value = "bar"
+	record.MustSet(doc)
+	rev2, kerr := table.UpdateRecord(record).Exec(this.conn)
+	c.Check(kerr, IsNil)
+	c.Check(rev2, Not(Equals), "")
+	c.Check(rev2, Not(Equals), rev)
+
+	result, kerr := table.Get("/").Exec(this.conn)
+	c.Check(kerr, IsNil)
+	c.Check(result.Id(), Equals, "/")
+	var doc2 testDoc
+	result.MustScan(&doc2)
+	c.Check(doc, DeepEquals, doc2)
+}
+
+func (this *TestSuite) TestUpdateKeys(c *C) {
+	const id = "548f18c364563464e6952076108c39ba"
+	const key1 = "by_session"
+	const key2 = "by_path"
+	const kv1 = "08b678e5-1df0-4380-80f5-69d90d64753a"
+	const kv2 = "/used.txt"
+
+	table := DB("db").Table("table")
+	db, kerr := this.conn.CreateDB("db", "mem", kissdif.Dictionary{})
+	c.Check(kerr, IsNil)
+	c.Check(db, NotNil)
+
+	data := &testDoc{Value: "foo"}
+	rev, kerr := table.Insert(id, data).By(key1, kv1).Exec(this.conn)
+	c.Check(kerr, IsNil)
+	c.Check(rev, Not(Equals), "")
+
+	record, kerr := table.Get(id).Exec(this.conn)
+	c.Check(kerr, IsNil)
+	c.Check(record, NotNil)
+	c.Check(record.Keys()[key1], DeepEquals, []string{kv1})
+
+	// record.Keys().Drop(key1, "1")
+	// record.Keys().Add(key1, "2")
+	record.Keys().Add(key2, kv2)
+
+	rev2, kerr := table.UpdateRecord(record).Exec(this.conn)
+	c.Check(kerr, IsNil)
+	c.Check(rev2, Not(Equals), "")
+	c.Check(rev2, Not(Equals), rev)
+
+	result, kerr := table.Get(id).Exec(this.conn)
+	c.Check(kerr, IsNil)
+	c.Check(result.Id(), Equals, id)
+	c.Check(record.Keys()[key1], DeepEquals, []string{kv1})
+	c.Check(record.Keys()[key2], DeepEquals, []string{kv2})
+}

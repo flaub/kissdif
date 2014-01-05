@@ -53,34 +53,29 @@ func NewRecord(id, rev string, doc interface{}) *Record {
 	}
 }
 
-func (this *Record) AddKey(name, value string) *Record {
-	index, ok := this.Keys[name]
+func (this IndexMap) Add(name, value string) {
+	keys, ok := this[name]
 	if !ok {
-		index = []string{}
+		keys = []string{}
 	}
 	// ignore duplicates
-	for _, v := range index {
+	for _, v := range keys {
 		if v == value {
-			return this
+			return
 		}
 	}
-	this.Keys[name] = append(index, value)
-	return this
+	this[name] = append(keys, value)
 }
 
-func (this *Record) DropKey(name, value string) *Record {
-	this.Keys.drop(name, value)
-	return this
-}
-
-func (this IndexMap) drop(name, value string) {
-	index, ok := this[name]
+func (this IndexMap) Drop(name, value string) {
+	keys, ok := this[name]
 	if !ok {
 		return
 	}
-	for i, v := range index {
+	for i, v := range keys {
 		if v == value {
-			index[i], index = index[len(index)-1], index[:len(index)-1]
+			this[name] = append(keys[:i], keys[i+1:]...)
+			return
 		}
 	}
 }

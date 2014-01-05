@@ -191,8 +191,7 @@ func (this QueryImpl) UpdateRecord(record Record) PutStmt {
 	this.Record_.Rev = record.Rev()
 	record.MustScan(&this.Record_.Doc)
 	stmt := putStmt{this}
-	stmt.Keys(record.Keys())
-	return stmt
+	return stmt.Keys(record.Keys())
 }
 
 func (this QueryImpl) DeleteRecord(record Record) ExecStmt {
@@ -213,7 +212,7 @@ func (this putStmt) Keys(keys kissdif.IndexMap) PutStmt {
 
 func (this putStmt) By(key, value string) PutStmt {
 	this.Record_.Keys = this.Record_.Keys.Clone()
-	this.Record_.AddKey(key, value)
+	this.Record_.Keys.Add(key, value)
 	return this
 }
 
