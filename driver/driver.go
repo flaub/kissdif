@@ -3,7 +3,6 @@ package driver
 import (
 	"github.com/flaub/ergo"
 	. "github.com/flaub/kissdif"
-	"net/http"
 )
 
 var drivers = make(map[string]Driver)
@@ -24,7 +23,7 @@ func Register(name string, driver Driver) {
 func Open(name string) (Driver, *ergo.Error) {
 	driver, ok := drivers[name]
 	if !ok {
-		return nil, NewError(http.StatusNotFound, "name", name)
+		return nil, NewError(EMissingDriver, "name", name)
 	}
 	return driver, nil
 }

@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"github.com/ant0ine/go-json-rest"
 	"github.com/flaub/ergo"
-	. "github.com/flaub/kissdif"
+	"github.com/flaub/kissdif"
 	"github.com/flaub/kissdif/driver"
 	"github.com/ugorji/go/codec"
 	"log"
@@ -56,29 +56,29 @@ func (this *ResponseWriter) WriteData(v interface{}) error {
 func (this *ResponseWriter) Error(err *ergo.Error) {
 	var code int
 	switch err.Code {
-	case ENone:
+	case kissdif.ENone:
 		code = http.StatusOK
-	case EGeneric:
+	case kissdif.EGeneric:
 		code = http.StatusInternalServerError
-	case EMissingDriver:
+	case kissdif.EMissingDriver:
 		code = http.StatusNotImplemented
-	case EConflict:
+	case kissdif.EConflict:
 		code = http.StatusConflict
-	case EBadTable:
+	case kissdif.EBadTable:
 		code = http.StatusNotFound
-	case EBadIndex:
+	case kissdif.EBadIndex:
 		code = http.StatusNotFound
-	case EBadParam:
+	case kissdif.EBadParam:
 		code = http.StatusBadRequest
-	case EBadQuery:
+	case kissdif.EBadQuery:
 		code = http.StatusBadRequest
-	case EBadDatabase:
+	case kissdif.EBadDatabase:
 		code = http.StatusNotFound
-	case EBadRouteVar:
+	case kissdif.EBadRouteVar:
 		code = http.StatusInternalServerError
-	case EBadRequest:
+	case kissdif.EBadRequest:
 		code = http.StatusBadRequest
-	case ENotFound:
+	case kissdif.ENotFound:
 		code = http.StatusNotFound
 	default:
 		log.Panicf("Forgot to check for error code: %d", err.Code)
@@ -155,7 +155,7 @@ func (this *Server) findDb(name string) (driver.Database, *ergo.Error) {
 	defer this.mutex.RUnlock()
 	db, ok := this.dbs[name]
 	if !ok {
-		return nil, NewError(EBadDatabase, "name", name)
+		return nil, kissdif.NewError(kissdif.EBadDatabase, "name", name)
 	}
 	return db, nil
 }
@@ -163,11 +163,11 @@ func (this *Server) findDb(name string) (driver.Database, *ergo.Error) {
 func (this *Server) getVar(req *Request, name string) (string, *ergo.Error) {
 	raw, ok := req.PathParams[name]
 	if !ok {
-		return "", NewError(EBadRouteVar, "name", name)
+		return "", kissdif.NewError(kissdif.EBadRouteVar, "name", name)
 	}
 	value, err := url.QueryUnescape(raw)
 	if err != nil {
-		return "", Wrap(err)
+		return "", kissdif.Wrap(err)
 	}
 	return value, nil
 }
@@ -194,10 +194,10 @@ func (this *Server) putDb(resp *ResponseWriter, req *Request) interface{} {
 	if kerr != nil {
 		return kerr
 	}
-	var dbcfg DatabaseCfg
+	var dbcfg kissdif.DatabaseCfg
 	err := req.DecodePayload(&dbcfg)
 	if err != nil {
-		return NewError(EBadDatabase, "err", err.Error())
+		return kissdif.NewError(kissdif.EBadDatabase, "err", err.Error())
 	}
 	drv, kerr := driver.Open(dbcfg.Driver)
 	if kerr != nil {
@@ -218,10 +218,10 @@ func (this *Server) putRecord(resp *ResponseWriter, req *Request) interface{} {
 	if kerr != nil {
 		return kerr
 	}
-	var record Record
+	var record kissdif.Record
 	err := req.DecodePayload(&record)
 	if err != nil {
-		return NewError(EBadRequest, "err", err.Error())
+		return kissdif.NewError(kissdif.EBadRequest, "err", err.Error())
 	}
 	// log.Printf("PUT record: %v\n%v", req.URL, record)
 	id, kerr := this.getVar(req, "key")
@@ -229,7 +229,7 @@ func (this *Server) putRecord(resp *ResponseWriter, req *Request) interface{} {
 		return kerr
 	}
 	if record.Id != id {
-		return NewError(EBadParam, "name", "id", "value", id)
+		return kissdif.NewError(kissdif.EBadParam, "name", "id", "value", id)
 	}
 	rev, kerr := table.Put(&record)
 	if kerr != nil {
@@ -257,7 +257,7 @@ func (this *Server) doQuery(resp *ResponseWriter, req *Request) interface{} {
 	if kerr != nil {
 		return kerr
 	}
-	query := NewQuery(index, lower, upper, limit)
+	query := kissdif.NewQuery(index, lower, upper, limit)
 	result, kerr := this.processQuery(table, query)
 	if kerr != nil {
 		return kerr
@@ -284,13 +284,13 @@ func (this *Server) getRecord(resp *ResponseWriter, req *Request) interface{} {
 	if kerr != nil {
 		return kerr
 	}
-	query := NewQueryEQ(index, key, limit)
+	query := kissdif.NewQueryEQ(index, key, limit)
 	result, kerr := this.processQuery(table, query)
 	if kerr != nil {
 		return kerr
 	}
 	if len(result.Records) == 0 {
-		return NewError(ENotFound)
+		return kissdif.NewError(kissdif.ENotFound)
 	}
 	return result
 }
@@ -309,14 +309,14 @@ func (this *Server) deleteRecord(resp *ResponseWriter, req *Request) interface{}
 	return nil
 }
 
-func (this *Server) processQuery(table driver.Table, query *Query) (*ResultSet, *ergo.Error) {
+func (this *Server) processQuery(table driver.Table, query *kissdif.Query) (*kissdif.ResultSet, *ergo.Error) {
 	ch, kerr := table.Get(query)
 	if kerr != nil {
 		return nil, kerr
 	}
-	result := &ResultSet{
+	result := &kissdif.ResultSet{
 		More:    true,
-		Records: []*Record{},
+		Records: []*kissdif.Record{},
 	}
 	for record := range ch {
 		if record == nil {
@@ -335,70 +335,70 @@ func getLimit(args url.Values) (uint, *ergo.Error) {
 		var err error
 		limit, err = strconv.ParseUint(strLimit, 10, 32)
 		if err != nil {
-			return 0, NewError(EBadParam, "name", limit, "value", strLimit, "err", err.Error())
+			return 0, kissdif.NewError(kissdif.EBadParam, "name", limit, "value", strLimit, "err", err.Error())
 		}
 	}
 	return uint(limit), nil
 }
 
-func getBounds(args url.Values) (lower, upper Bound, err *ergo.Error) {
+func getBounds(args url.Values) (lower, upper kissdif.Bound, err *ergo.Error) {
 	for k, v := range args {
 		switch k {
 		case "eq":
 			if lower.IsDefined() || upper.IsDefined() {
-				err = NewError(EBadQuery)
+				err = kissdif.NewError(kissdif.EBadQuery)
 				return
 			}
 			if len(v) != 1 {
-				err = NewError(EBadQuery)
+				err = kissdif.NewError(kissdif.EBadQuery)
 				return
 			}
-			lower = Bound{true, v[0]}
-			upper = Bound{true, v[0]}
+			lower = kissdif.Bound{true, v[0]}
+			upper = kissdif.Bound{true, v[0]}
 			break
 		case "lt":
 			if upper.IsDefined() {
-				err = NewError(EBadQuery)
+				err = kissdif.NewError(kissdif.EBadQuery)
 				return
 			}
 			if len(v) != 1 {
-				err = NewError(EBadQuery)
+				err = kissdif.NewError(kissdif.EBadQuery)
 				return
 			}
-			upper = Bound{false, v[0]}
+			upper = kissdif.Bound{false, v[0]}
 			break
 		case "le":
 			if upper.IsDefined() {
-				err = NewError(EBadQuery)
+				err = kissdif.NewError(kissdif.EBadQuery)
 				return
 			}
 			if len(v) != 1 {
-				err = NewError(EBadQuery)
+				err = kissdif.NewError(kissdif.EBadQuery)
 				return
 			}
-			upper = Bound{true, v[0]}
+			upper = kissdif.Bound{true, v[0]}
 			break
 		case "gt":
 			if lower.IsDefined() {
-				err = NewError(EBadQuery)
+				err = kissdif.NewError(kissdif.EBadQuery)
 				return
 			}
 			if len(v) != 1 {
-				err = NewError(EBadQuery)
+				err = kissdif.NewError(kissdif.EBadQuery)
 				return
 			}
-			lower = Bound{false, v[0]}
+			lower = kissdif.Bound{false, v[0]}
 			break
 		case "ge":
 			if lower.IsDefined() {
-				err = NewError(EBadQuery)
+				err = kissdif.NewError(kissdif.EBadQuery)
 				return
 			}
 			if len(v) != 1 {
-				err = NewError(EBadQuery)
+				err = kissdif.NewError(kissdif.EBadQuery)
 				return
 			}
-			lower = Bound{true, v[0]}
+			lower = kissdif.Bound{true, v[0]}
 			break
 		}
 	}
