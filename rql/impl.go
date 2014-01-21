@@ -200,7 +200,7 @@ func (this QueryImpl) DeleteRecord(record Record) ExecStmt {
 	return deleteStmt{this}
 }
 
-func (this putStmt) Exec(conn Conn) (string, *ergo.Error) {
+func (this putStmt) Exec(conn Conn) (string, error) {
 	result, err := conn.Put(this.QueryImpl)
 	return result, ergo.Chain(err, kissdif.NewError(kissdif.EGeneric))
 }
@@ -216,17 +216,17 @@ func (this putStmt) By(key, value string) PutStmt {
 	return this
 }
 
-func (this deleteStmt) Exec(conn Conn) *ergo.Error {
+func (this deleteStmt) Exec(conn Conn) error {
 	err := conn.Delete(this.QueryImpl)
 	return ergo.Chain(err, kissdif.NewError(kissdif.EGeneric))
 }
 
-func (this QueryImpl) Exec(conn Conn) (ResultSet, *ergo.Error) {
+func (this QueryImpl) Exec(conn Conn) (ResultSet, error) {
 	result, err := conn.Get(this)
 	return result, ergo.Chain(err, kissdif.NewError(kissdif.EGeneric))
 }
 
-func (this getStmt) Exec(conn Conn) (Record, *ergo.Error) {
+func (this getStmt) Exec(conn Conn) (Record, error) {
 	if conn == nil {
 		return nil, kissdif.NewError(kissdif.EBadParam, "name", "conn", "value", conn)
 	}

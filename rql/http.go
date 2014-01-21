@@ -85,7 +85,7 @@ func (this *httpConn) makeUrl(impl QueryImpl) string {
 		url.QueryEscape(impl.Query_.Index))
 }
 
-func (this *httpConn) sendRequest(method, url string, v interface{}) (*http.Response, *ergo.Error) {
+func (this *httpConn) sendRequest(method, url string, v interface{}) (*http.Response, error) {
 	var buf bytes.Buffer
 	err := this.formatter.Encoder(&buf).Encode(v)
 	if err != nil {
@@ -103,7 +103,7 @@ func (this *httpConn) sendRequest(method, url string, v interface{}) (*http.Resp
 	return resp, nil
 }
 
-func (this *httpConn) recvReply(resp *http.Response, v interface{}) *ergo.Error {
+func (this *httpConn) recvReply(resp *http.Response, v interface{}) error {
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		var erg ergo.Error
@@ -128,7 +128,7 @@ func (this *httpConn) recvReply(resp *http.Response, v interface{}) *ergo.Error 
 	return nil
 }
 
-func (this *httpConn) roundTrip(method, url string, in, out interface{}) *ergo.Error {
+func (this *httpConn) roundTrip(method, url string, in, out interface{}) error {
 	resp, err := this.sendRequest(method, url, in)
 	if err != nil {
 		return err
@@ -136,7 +136,7 @@ func (this *httpConn) roundTrip(method, url string, in, out interface{}) *ergo.E
 	return this.recvReply(resp, out)
 }
 
-func (this *httpConn) CreateDB(name, driverName string, config kissdif.Dictionary) (Database, *ergo.Error) {
+func (this *httpConn) CreateDB(name, driverName string, config kissdif.Dictionary) (Database, error) {
 	url := fmt.Sprintf("%s/%s", this.baseUrl, name)
 	dbcfg := &kissdif.DatabaseCfg{
 		Name:   name,
@@ -150,14 +150,14 @@ func (this *httpConn) CreateDB(name, driverName string, config kissdif.Dictionar
 	return newQuery(name), nil
 }
 
-func (this *httpConn) DropDB(name string) *ergo.Error {
+func (this *httpConn) DropDB(name string) error {
 	return ergo.Wrap("Not implemented")
 }
 
 func (this *httpConn) RegisterType(name string, doc interface{}) {
 }
 
-func (this *httpConn) Get(impl QueryImpl) (ResultSet, *ergo.Error) {
+func (this *httpConn) Get(impl QueryImpl) (ResultSet, error) {
 	args := make(url.Values)
 	query := impl.Query_
 	if query.Limit != 0 {
@@ -191,7 +191,7 @@ func (this *httpConn) Get(impl QueryImpl) (ResultSet, *ergo.Error) {
 	return &result, nil
 }
 
-func (this *httpConn) Put(impl QueryImpl) (string, *ergo.Error) {
+func (this *httpConn) Put(impl QueryImpl) (string, error) {
 	record := impl.Record_
 	if record.Id == "" {
 		return "", kissdif.NewError(kissdif.EBadParam, "name", "id", "value", record.Id)
@@ -205,7 +205,7 @@ func (this *httpConn) Put(impl QueryImpl) (string, *ergo.Error) {
 	return rev, nil
 }
 
-func (this *httpConn) Delete(impl QueryImpl) *ergo.Error {
+func (this *httpConn) Delete(impl QueryImpl) error {
 	url := this.makeUrl(impl) + "/" + url.QueryEscape(impl.Record_.Id)
 	return this.roundTrip("DELETE", url, nil, nil)
 }

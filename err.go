@@ -51,14 +51,21 @@ func Wrap(err error) *ergo.Error {
 	return ergo.New(1, domain, EGeneric, "err", err.Error())
 }
 
-func IsError(err *ergo.Error, code ergo.ErrCode) bool {
+func IsError(err error, code ergo.ErrCode) bool {
 	if err == nil {
 		return false
 	}
 	cause := ergo.Cause(err)
-	return cause.Domain == domain && cause.Code == code
+	if kerr, ok := cause.(*ergo.Error); ok {
+		return kerr.Domain == domain && kerr.Code == code
+	}
+	return false
 }
 
-func IsConflict(err *ergo.Error) bool {
+func IsConflict(err error) bool {
 	return IsError(err, EConflict)
+}
+
+func IsBadTable(err error) bool {
+	return IsError(err, EBadTable)
 }
