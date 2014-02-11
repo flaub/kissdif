@@ -2,31 +2,75 @@ package rql
 
 import (
 	"encoding/json"
+	"github.com/flaub/ergo"
 	"github.com/flaub/kissdif"
-	"net/http"
 )
 
-type _Record struct {
+type ResultSetImpl struct {
+	More_    bool          `json:"more,omitempty" codec:"more,omitempty"`
+	Records_ []*RecordImpl `json:"records,omitempty" codec:"records,omitempty"`
+}
+
+type RecordReaderImpl struct {
+	records []*RecordImpl
+	record  *RecordImpl
+	index   int
+}
+
+func (this *ResultSetImpl) More() bool {
+	return this.More_
+}
+
+func (this *ResultSetImpl) Count() int {
+	return len(this.Records_)
+}
+
+func (this *ResultSetImpl) Reader() RecordReader {
+	return &RecordReaderImpl{records: this.Records_}
+}
+
+func (this *RecordReaderImpl) Record() Record {
+	return this.record
+}
+
+func (this *RecordReaderImpl) Next() bool {
+	if this.index == len(this.records) {
+		return false
+	}
+	this.record = this.records[this.index]
+	this.index++
+	return true
+}
+
+func (this *RecordReaderImpl) Scan(into interface{}) (interface{}, error) {
+	return this.Record().Scan(into)
+}
+
+func (this *RecordReaderImpl) MustScan(into interface{}) interface{} {
+	return this.Record().MustScan(into)
+}
+
+type RecordImpl struct {
 	Id_   string           `json:"id,omitempty" codec:"id,omitempty"`
 	Rev_  string           `json:"rev,omitempty" codec:"rev,omitempty"`
 	Doc_  json.RawMessage  `json:"doc,omitempty" codec:"doc,omitempty"`
 	Keys_ kissdif.IndexMap `json:"keys,omitempty" codec:"keys,omitempty"`
 }
 
-func (this *_Record) Id() string {
+func (this *RecordImpl) Id() string {
 	return this.Id_
 }
 
-func (this *_Record) Rev() string {
+func (this *RecordImpl) Rev() string {
 	return this.Rev_
 }
 
-func (this *_Record) Scan(into interface{}) (interface{}, error) {
+func (this *RecordImpl) Scan(into interface{}) (interface{}, error) {
 	err := json.Unmarshal(this.Doc_, into)
 	return into, err
 }
 
-func (this *_Record) MustScan(into interface{}) interface{} {
+func (this *RecordImpl) MustScan(into interface{}) interface{} {
 	result, err := this.Scan(into)
 	if err != nil {
 		panic(err)
@@ -34,174 +78,168 @@ func (this *_Record) MustScan(into interface{}) interface{} {
 	return result
 }
 
-func (this *_Record) Set(doc interface{}) (err error) {
+func (this *RecordImpl) Set(doc interface{}) (err error) {
 	this.Doc_, err = json.Marshal(doc)
 	return err
 }
 
-func (this *_Record) MustSet(doc interface{}) {
+func (this *RecordImpl) MustSet(doc interface{}) {
 	err := this.Set(doc)
 	if err != nil {
 		panic(err)
 	}
 }
 
-func (this *_Record) Keys() kissdif.IndexMap {
+func (this *RecordImpl) Keys() kissdif.IndexMap {
 	return this.Keys_
 }
 
 type putStmt struct {
-	queryImpl
+	QueryImpl
 }
 
 type getStmt struct {
-	queryImpl
+	QueryImpl
 }
 
 type deleteStmt struct {
-	queryImpl
+	QueryImpl
 }
 
-type queryImpl struct {
-	db     string
-	table  string
-	record kissdif.Record
-	query  kissdif.Query
+type QueryImpl struct {
+	Db_     string
+	Table_  string
+	Record_ kissdif.Record
+	Query_  kissdif.Query
 }
 
-func newQuery(db string) queryImpl {
-	return queryImpl{
-		db: db,
-		record: kissdif.Record{
+func newQuery(db string) QueryImpl {
+	return QueryImpl{
+		Db_: db,
+		Record_: kissdif.Record{
 			Keys: make(kissdif.IndexMap),
 		},
-		query: kissdif.Query{
+		Query_: kissdif.Query{
 			Index: "_id",
 			Limit: 1000,
 		},
 	}
 }
 
-func (this queryImpl) DropTable(name string) ExecStmt {
-	this.table = name
+func (this QueryImpl) DropTable(name string) ExecStmt {
+	this.Table_ = name
 	return nil
 }
 
-func (this queryImpl) Table(name string) Table {
-	this.table = name
+func (this QueryImpl) Table(name string) Table {
+	this.Table_ = name
 	return this
 }
 
-func (this queryImpl) Limit(count uint) Query {
-	this.query.Limit = count
+func (this QueryImpl) Limit(count uint) Query {
+	this.Query_.Limit = count
 	return this
 }
 
-func (this queryImpl) By(index string) Query {
-	this.query.Index = index
+func (this QueryImpl) By(index string) Query {
+	this.Query_.Index = index
 	return this
 }
 
-func (this queryImpl) Get(key string) SingleStmt {
-	bound := &kissdif.Bound{true, key}
-	this.query.Limit = 1
-	this.query.Lower = bound
-	this.query.Upper = bound
+func (this QueryImpl) Get(key string) SingleStmt {
+	bound := kissdif.Bound{true, key}
+	this.Query_.Limit = 1
+	this.Query_.Lower = bound
+	this.Query_.Upper = bound
 	return getStmt{this}
 }
 
-func (this queryImpl) GetAll(key string) Limitable {
-	bound := &kissdif.Bound{true, key}
-	this.query.Lower = bound
-	this.query.Upper = bound
+func (this QueryImpl) GetAll(key string) Limitable {
+	bound := kissdif.Bound{true, key}
+	this.Query_.Lower = bound
+	this.Query_.Upper = bound
 	return this
 }
 
-func (this queryImpl) Between(lower, upper string) Limitable {
-	this.query.Lower = &kissdif.Bound{true, lower}
-	this.query.Upper = &kissdif.Bound{false, upper}
+func (this QueryImpl) Between(lower, upper string) Limitable {
+	this.Query_.Lower = kissdif.Bound{true, lower}
+	this.Query_.Upper = kissdif.Bound{false, upper}
 	return this
 }
 
-func (this queryImpl) Insert(id string, doc interface{}) PutStmt {
-	this.record.Id = id
-	this.record.Doc = doc
+func (this QueryImpl) Insert(id string, doc interface{}) PutStmt {
+	this.Record_.Id = id
+	this.Record_.Doc = doc
 	return putStmt{this}
 }
 
-func (this queryImpl) Update(id, rev string, doc interface{}) PutStmt {
-	this.record.Id = id
-	this.record.Rev = rev
-	this.record.Doc = doc
+func (this QueryImpl) Update(id, rev string, doc interface{}) PutStmt {
+	this.Record_.Id = id
+	this.Record_.Rev = rev
+	this.Record_.Doc = doc
 	return putStmt{this}
 }
 
-func (this queryImpl) Delete(id, rev string) ExecStmt {
-	this.record.Id = id
-	this.record.Rev = rev
+func (this QueryImpl) Delete(id, rev string) ExecStmt {
+	this.Record_.Id = id
+	this.Record_.Rev = rev
 	return deleteStmt{this}
 }
 
-func (this queryImpl) UpdateRecord(record Record) PutStmt {
-	this.record.Id = record.Id()
-	this.record.Rev = record.Rev()
-	record.MustScan(&this.record.Doc)
+func (this QueryImpl) UpdateRecord(record Record) PutStmt {
+	this.Record_.Id = record.Id()
+	this.Record_.Rev = record.Rev()
+	record.MustScan(&this.Record_.Doc)
 	stmt := putStmt{this}
-	stmt.Keys(record.Keys())
-	return stmt
+	return stmt.Keys(record.Keys())
 }
 
-func (this queryImpl) DeleteRecord(record Record) ExecStmt {
-	this.record.Id = record.Id()
-	this.record.Rev = record.Rev()
+func (this QueryImpl) DeleteRecord(record Record) ExecStmt {
+	this.Record_.Id = record.Id()
+	this.Record_.Rev = record.Rev()
 	return deleteStmt{this}
 }
 
-func (this putStmt) Exec(conn Conn) (string, *kissdif.Error) {
-	return conn.put(this.queryImpl)
+func (this putStmt) Exec(conn Conn) (string, error) {
+	result, err := conn.Put(this.QueryImpl)
+	return result, ergo.Chain(err, kissdif.NewError(kissdif.EGeneric))
 }
 
 func (this putStmt) Keys(keys kissdif.IndexMap) PutStmt {
-	this.record.Keys = make(kissdif.IndexMap)
-	for k, v := range keys {
-		this.record.Keys[k] = v
-	}
+	this.Record_.Keys = keys.Clone()
 	return this
 }
 
 func (this putStmt) By(key, value string) PutStmt {
-	keys := this.record.Keys
-	this.record.Keys = make(kissdif.IndexMap)
-	for k, v := range keys {
-		this.record.Keys[k] = v
-	}
-	this.record.AddKey(key, value)
+	this.Record_.Keys = this.Record_.Keys.Clone()
+	this.Record_.Keys.Add(key, value)
 	return this
 }
 
-func (this deleteStmt) Exec(conn Conn) *kissdif.Error {
-	return conn.delete(this.queryImpl)
+func (this deleteStmt) Exec(conn Conn) error {
+	err := conn.Delete(this.QueryImpl)
+	return ergo.Chain(err, kissdif.NewError(kissdif.EGeneric))
 }
 
-func (this queryImpl) Exec(conn Conn) (*ResultSet, *kissdif.Error) {
-	return conn.get(this)
+func (this QueryImpl) Exec(conn Conn) (ResultSet, error) {
+	result, err := conn.Get(this)
+	return result, ergo.Chain(err, kissdif.NewError(kissdif.EGeneric))
 }
 
-func (this getStmt) Exec(conn Conn) (Record, *kissdif.Error) {
+func (this getStmt) Exec(conn Conn) (Record, error) {
 	if conn == nil {
-		return nil, kissdif.NewError(http.StatusBadRequest, "conn must not be null")
+		return nil, kissdif.NewError(kissdif.EBadParam, "name", "conn", "value", conn)
 	}
-	resultSet, err := conn.get(this.queryImpl)
+	resultSet, err := conn.Get(this.QueryImpl)
 	if err != nil {
-		return nil, err
+		return nil, ergo.Chain(err, kissdif.NewError(kissdif.EGeneric))
 	}
-	// fmt.Printf("RS: %v\n", resultSet)
-	if resultSet.More || len(resultSet.Records) > 1 {
-		return nil, kissdif.NewError(http.StatusMultipleChoices, "Multiple records found")
+	reader := resultSet.Reader()
+	if !reader.Next() {
+		return nil, kissdif.NewError(kissdif.ENotFound)
 	}
-	if len(resultSet.Records) == 0 {
-		return nil, kissdif.NewError(http.StatusNotFound, "Record not found")
+	if reader.Next() || resultSet.More() {
+		return nil, kissdif.NewError(kissdif.EMultiple)
 	}
-	record := resultSet.Records[0]
-	return record, nil
+	return reader.Record(), nil
 }

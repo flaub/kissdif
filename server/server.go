@@ -4,7 +4,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"github.com/ant0ine/go-json-rest"
-	. "github.com/flaub/kissdif"
+	"github.com/flaub/ergo"
+	"github.com/flaub/kissdif"
 	"github.com/flaub/kissdif/driver"
 	"github.com/ugorji/go/codec"
 	"log"
@@ -52,8 +53,42 @@ func (this *ResponseWriter) WriteData(v interface{}) error {
 	return this.enc.Encode(v)
 }
 
+func (this *ResponseWriter) Error(err *ergo.Error) {
+	var code int
+	switch err.Code {
+	case kissdif.ENone:
+		code = http.StatusOK
+	case kissdif.EGeneric:
+		code = http.StatusInternalServerError
+	case kissdif.EMissingDriver:
+		code = http.StatusNotImplemented
+	case kissdif.EConflict:
+		code = http.StatusConflict
+	case kissdif.EBadTable:
+		code = http.StatusNotFound
+	case kissdif.EBadIndex:
+		code = http.StatusNotFound
+	case kissdif.EBadParam:
+		code = http.StatusBadRequest
+	case kissdif.EBadQuery:
+		code = http.StatusBadRequest
+	case kissdif.EBadDatabase:
+		code = http.StatusNotFound
+	case kissdif.EBadRouteVar:
+		code = http.StatusInternalServerError
+	case kissdif.EBadRequest:
+		code = http.StatusBadRequest
+	case kissdif.ENotFound:
+		code = http.StatusNotFound
+	default:
+		log.Panicf("Forgot to check for error code: %d", err.Code)
+	}
+	this.WriteHeader(code)
+	this.WriteData(err)
+}
+
 type RestHandlerFunc func(*rest.ResponseWriter, *rest.Request)
-type HandlerFunc func(*ResponseWriter, *Request)
+type HandlerFunc func(*ResponseWriter, *Request) interface{}
 
 func typeWrapper(fn HandlerFunc) RestHandlerFunc {
 	return func(resp *rest.ResponseWriter, req *rest.Request) {
@@ -79,10 +114,15 @@ func typeWrapper(fn HandlerFunc) RestHandlerFunc {
 			msg := fmt.Sprintf("Bad Content-Type: %q", mediatype)
 			http.Error(resp, msg, http.StatusUnsupportedMediaType)
 		}
-		w := &ResponseWriter{ResponseWriter: resp, enc: enc}
-		r := &Request{Request: req, dec: dec}
-		fn(w, r)
-		return
+		writer := &ResponseWriter{ResponseWriter: resp, enc: enc}
+		reader := &Request{Request: req, dec: dec}
+		ret := fn(writer, reader)
+		writer.Header().Set("Content-Type", ctype)
+		if err, ok := ret.(*ergo.Error); ok {
+			writer.Error(err)
+		} else if ret != nil {
+			writer.WriteData(ret)
+		}
 	}
 }
 
@@ -110,29 +150,29 @@ func NewServer() *Server {
 	return this
 }
 
-func (this *Server) findDb(name string) (driver.Database, *Error) {
+func (this *Server) findDb(name string) (driver.Database, *ergo.Error) {
 	this.mutex.RLock()
 	defer this.mutex.RUnlock()
 	db, ok := this.dbs[name]
 	if !ok {
-		return nil, NewError(http.StatusNotFound, "Database not found")
+		return nil, kissdif.NewError(kissdif.EBadDatabase, "name", name)
 	}
 	return db, nil
 }
 
-func (this *Server) getVar(req *Request, name string) (string, *Error) {
+func (this *Server) getVar(req *Request, name string) (string, *ergo.Error) {
 	raw, ok := req.PathParams[name]
 	if !ok {
-		return "", NewError(http.StatusInternalServerError, fmt.Sprintf("Missing route variable: %v", name))
+		return "", kissdif.NewError(kissdif.EBadRouteVar, "name", name)
 	}
 	value, err := url.QueryUnescape(raw)
 	if err != nil {
-		return "", NewError(http.StatusBadRequest, err.Error())
+		return "", kissdif.Wrap(err)
 	}
 	return value, nil
 }
 
-func (this *Server) getTable(req *Request, create bool) (driver.Table, *Error) {
+func (this *Server) getTable(req *Request, create bool) (driver.Table, *ergo.Error) {
 	dbName, kerr := this.getVar(req, "db")
 	if kerr != nil {
 		return nil, kerr
@@ -148,155 +188,135 @@ func (this *Server) getTable(req *Request, create bool) (driver.Table, *Error) {
 	return db.GetTable(tableName, create)
 }
 
-func (this *Server) putDb(resp *ResponseWriter, req *Request) {
+func (this *Server) putDb(resp *ResponseWriter, req *Request) interface{} {
 	// log.Printf("PUT db: %v\n", req.URL)
 	dbName, kerr := this.getVar(req, "db")
 	if kerr != nil {
-		http.Error(resp, kerr.Error(), kerr.Status)
-		return
+		return kerr
 	}
-	var dbcfg DatabaseCfg
+	var dbcfg kissdif.DatabaseCfg
 	err := req.DecodePayload(&dbcfg)
 	if err != nil {
-		http.Error(resp, err.Error(), http.StatusBadRequest)
-		return
+		return kissdif.NewError(kissdif.EBadDatabase, "err", err.Error())
 	}
 	drv, kerr := driver.Open(dbcfg.Driver)
 	if kerr != nil {
-		http.Error(resp, kerr.Error(), kerr.Status)
-		return
+		return kerr
 	}
 	db, kerr := drv.Configure(dbName, dbcfg.Config)
 	if kerr != nil {
-		http.Error(resp, kerr.Error(), kerr.Status)
-		return
+		return kerr
 	}
 	this.mutex.Lock()
 	defer this.mutex.Unlock()
 	this.dbs[dbName] = db
+	return nil
 }
 
-func (this *Server) putRecord(resp *ResponseWriter, req *Request) {
+func (this *Server) putRecord(resp *ResponseWriter, req *Request) interface{} {
 	table, kerr := this.getTable(req, true)
 	if kerr != nil {
-		http.Error(resp, kerr.Error(), kerr.Status)
-		return
+		return kerr
 	}
-	var record Record
+	var record kissdif.Record
 	err := req.DecodePayload(&record)
 	if err != nil {
-		http.Error(resp, err.Error(), http.StatusBadRequest)
-		return
+		return kissdif.NewError(kissdif.EBadRequest, "err", err.Error())
 	}
-	log.Printf("PUT record: %v\n%v", req.URL, record)
+	// log.Printf("PUT record: %v\n%v", req.URL, record)
 	id, kerr := this.getVar(req, "key")
 	if kerr != nil {
-		http.Error(resp, kerr.Error(), kerr.Status)
-		return
+		return kerr
 	}
 	if record.Id != id {
-		http.Error(resp, "ID Mismatch", http.StatusBadRequest)
-		return
+		return kissdif.NewError(kissdif.EBadParam, "name", "id", "value", id)
 	}
 	rev, kerr := table.Put(&record)
 	if kerr != nil {
-		http.Error(resp, kerr.Error(), kerr.Status)
-		return
+		return kerr
 	}
-	resp.WriteData(rev)
+	return rev
 }
 
-func (this *Server) doQuery(resp *ResponseWriter, req *Request) {
+func (this *Server) doQuery(resp *ResponseWriter, req *Request) interface{} {
 	// fmt.Printf("GET records: %v\n", req.URL)
 	args := req.URL.Query()
 	table, kerr := this.getTable(req, false)
 	if kerr != nil {
-		http.Error(resp, kerr.Error(), kerr.Status)
-		return
+		return kerr
 	}
 	lower, upper, kerr := getBounds(args)
 	if kerr != nil {
-		http.Error(resp, kerr.Error(), kerr.Status)
-		return
+		return kerr
 	}
 	limit, kerr := getLimit(args)
 	if kerr != nil {
-		http.Error(resp, kerr.Error(), kerr.Status)
-		return
+		return kerr
 	}
 	index, kerr := this.getVar(req, "index")
 	if kerr != nil {
-		http.Error(resp, kerr.Error(), kerr.Status)
-		return
+		return kerr
 	}
-	query := NewQuery(index, lower, upper, limit)
+	query := kissdif.NewQuery(index, lower, upper, limit)
 	result, kerr := this.processQuery(table, query)
 	if kerr != nil {
-		http.Error(resp, kerr.Error(), kerr.Status)
-		return
+		return kerr
 	}
-	resp.WriteData(result)
+	return result
 }
 
-func (this *Server) getRecord(resp *ResponseWriter, req *Request) {
+func (this *Server) getRecord(resp *ResponseWriter, req *Request) interface{} {
 	// log.Printf("GET record: %v\n", req.URL)
 	args := req.URL.Query()
 	table, kerr := this.getTable(req, false)
 	if kerr != nil {
-		http.Error(resp, kerr.Error(), kerr.Status)
-		return
+		return kerr
 	}
 	limit, kerr := getLimit(args)
 	if kerr != nil {
-		http.Error(resp, kerr.Error(), kerr.Status)
-		return
+		return kerr
 	}
 	index, kerr := this.getVar(req, "index")
 	if kerr != nil {
-		http.Error(resp, kerr.Error(), kerr.Status)
-		return
+		return kerr
 	}
 	key, kerr := this.getVar(req, "key")
 	if kerr != nil {
-		http.Error(resp, kerr.Error(), kerr.Status)
-		return
+		return kerr
 	}
-	query := NewQueryEQ(index, key, limit)
+	query := kissdif.NewQueryEQ(index, key, limit)
 	result, kerr := this.processQuery(table, query)
 	if kerr != nil {
-		http.Error(resp, kerr.Error(), kerr.Status)
-		return
+		return kerr
 	}
 	if len(result.Records) == 0 {
-		http.Error(resp, "Record not found", http.StatusNotFound)
-		return
+		return kissdif.NewError(kissdif.ENotFound)
 	}
-	resp.WriteData(result)
+	return result
 }
 
-func (this *Server) deleteRecord(resp *ResponseWriter, req *Request) {
+func (this *Server) deleteRecord(resp *ResponseWriter, req *Request) interface{} {
 	// log.Printf("DELETE record: %v\n", req.URL)
 	table, kerr := this.getTable(req, false)
 	if kerr != nil {
-		http.Error(resp, kerr.Error(), kerr.Status)
-		return
+		return kerr
 	}
 	key, kerr := this.getVar(req, "key")
 	if kerr != nil {
-		http.Error(resp, kerr.Error(), kerr.Status)
-		return
+		return kerr
 	}
 	table.Delete(key)
+	return nil
 }
 
-func (this *Server) processQuery(table driver.Table, query *Query) (*ResultSet, *Error) {
+func (this *Server) processQuery(table driver.Table, query *kissdif.Query) (*kissdif.ResultSet, *ergo.Error) {
 	ch, kerr := table.Get(query)
 	if kerr != nil {
 		return nil, kerr
 	}
-	result := &ResultSet{
+	result := &kissdif.ResultSet{
 		More:    true,
-		Records: []*Record{},
+		Records: []*kissdif.Record{},
 	}
 	for record := range ch {
 		if record == nil {
@@ -308,77 +328,77 @@ func (this *Server) processQuery(table driver.Table, query *Query) (*ResultSet, 
 	return result, nil
 }
 
-func getLimit(args url.Values) (uint, *Error) {
+func getLimit(args url.Values) (uint, *ergo.Error) {
 	var limit uint64 = 1000
 	strLimit := args.Get("limit")
 	if strLimit != "" {
 		var err error
 		limit, err = strconv.ParseUint(strLimit, 10, 32)
 		if err != nil {
-			return 0, NewError(http.StatusBadRequest, err.Error())
+			return 0, kissdif.NewError(kissdif.EBadParam, "name", limit, "value", strLimit, "err", err.Error())
 		}
 	}
 	return uint(limit), nil
 }
 
-func getBounds(args url.Values) (lower, upper *Bound, err *Error) {
+func getBounds(args url.Values) (lower, upper kissdif.Bound, err *ergo.Error) {
 	for k, v := range args {
 		switch k {
 		case "eq":
-			if lower != nil || upper != nil {
-				err = NewError(http.StatusBadGateway, "Invalid query")
+			if lower.IsDefined() || upper.IsDefined() {
+				err = kissdif.NewError(kissdif.EBadQuery)
 				return
 			}
 			if len(v) != 1 {
-				err = NewError(http.StatusBadGateway, "Invalid query")
+				err = kissdif.NewError(kissdif.EBadQuery)
 				return
 			}
-			lower = &Bound{true, v[0]}
-			upper = &Bound{true, v[0]}
+			lower = kissdif.Bound{true, v[0]}
+			upper = kissdif.Bound{true, v[0]}
 			break
 		case "lt":
-			if upper != nil {
-				err = NewError(http.StatusBadGateway, "Invalid query")
+			if upper.IsDefined() {
+				err = kissdif.NewError(kissdif.EBadQuery)
 				return
 			}
 			if len(v) != 1 {
-				err = NewError(http.StatusBadGateway, "Invalid query")
+				err = kissdif.NewError(kissdif.EBadQuery)
 				return
 			}
-			upper = &Bound{false, v[0]}
+			upper = kissdif.Bound{false, v[0]}
 			break
 		case "le":
-			if upper != nil {
-				err = NewError(http.StatusBadGateway, "Invalid query")
+			if upper.IsDefined() {
+				err = kissdif.NewError(kissdif.EBadQuery)
 				return
 			}
 			if len(v) != 1 {
-				err = NewError(http.StatusBadGateway, "Invalid query")
+				err = kissdif.NewError(kissdif.EBadQuery)
 				return
 			}
-			upper = &Bound{true, v[0]}
+			upper = kissdif.Bound{true, v[0]}
 			break
 		case "gt":
-			if lower != nil {
-				err = NewError(http.StatusBadGateway, "Invalid query")
+			if lower.IsDefined() {
+				err = kissdif.NewError(kissdif.EBadQuery)
 				return
 			}
 			if len(v) != 1 {
-				err = NewError(http.StatusBadGateway, "Invalid query")
+				err = kissdif.NewError(kissdif.EBadQuery)
 				return
 			}
-			lower = &Bound{false, v[0]}
+			lower = kissdif.Bound{false, v[0]}
 			break
 		case "ge":
-			if lower != nil {
-				err = NewError(http.StatusBadGateway, "Invalid query")
+			if lower.IsDefined() {
+				err = kissdif.NewError(kissdif.EBadQuery)
 				return
 			}
 			if len(v) != 1 {
-				err = NewError(http.StatusBadGateway, "Invalid query")
+				err = kissdif.NewError(kissdif.EBadQuery)
 				return
 			}
-			lower = &Bound{true, v[0]}
+			lower = kissdif.Bound{true, v[0]}
 			break
 		}
 	}

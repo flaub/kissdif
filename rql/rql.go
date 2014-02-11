@@ -6,9 +6,17 @@ import (
 	_url "net/url"
 )
 
-type ResultSet struct {
-	More    bool
-	Records []*_Record
+type ResultSet interface {
+	More() bool
+	Count() int
+	Reader() RecordReader
+}
+
+type RecordReader interface {
+	Next() bool
+	Record() Record
+	Scan(into interface{}) (interface{}, error)
+	MustScan(into interface{}) interface{}
 }
 
 type Record interface {
@@ -24,11 +32,11 @@ type Record interface {
 }
 
 type Conn interface {
-	CreateDB(name, driver string, config kissdif.Dictionary) (Database, *kissdif.Error)
-	DropDB(name string) *kissdif.Error
-	get(query queryImpl) (*ResultSet, *kissdif.Error)
-	put(query queryImpl) (string, *kissdif.Error)
-	delete(query queryImpl) *kissdif.Error
+	CreateDB(name, driver string, config kissdif.Dictionary) (Database, error)
+	DropDB(name string) error
+	Get(impl QueryImpl) (ResultSet, error)
+	Put(impl QueryImpl) (string, error)
+	Delete(impl QueryImpl) error
 }
 
 type Database interface {
@@ -37,21 +45,21 @@ type Database interface {
 }
 
 type ExecStmt interface {
-	Exec(conn Conn) *kissdif.Error
+	Exec(conn Conn) error
 }
 
 type SingleStmt interface {
-	Exec(conn Conn) (Record, *kissdif.Error)
+	Exec(conn Conn) (Record, error)
 }
 
 type PutStmt interface {
-	Exec(conn Conn) (string, *kissdif.Error)
+	Exec(conn Conn) (string, error)
 	By(key, value string) PutStmt
 	Keys(keys kissdif.IndexMap) PutStmt
 }
 
 type MultiStmt interface {
-	Exec(conn Conn) (*ResultSet, *kissdif.Error)
+	Exec(conn Conn) (ResultSet, error)
 }
 
 type Limitable interface {
@@ -80,7 +88,7 @@ type Table interface {
 	DeleteRecord(record Record) ExecStmt
 }
 
-func Connect(url string) (Conn, *kissdif.Error) {
+func Connect(url string) (Conn, error) {
 	theUrl, err := _url.Parse(url)
 	if err != nil {
 		return nil, kissdif.NewError(http.StatusBadRequest, err.Error())
@@ -97,31 +105,4 @@ func Connect(url string) (Conn, *kissdif.Error) {
 
 func DB(name string) Database {
 	return newQuery(name)
-}
-
-type RecordReader struct {
-	records []*_Record
-	index   int
-}
-
-func (this *ResultSet) Reader() *RecordReader {
-	return &RecordReader{records: this.Records}
-}
-
-func (this *RecordReader) Next() bool {
-	if this.index == len(this.records) {
-		return false
-	}
-	this.index++
-	return true
-}
-
-func (this *RecordReader) Scan(into interface{}) (interface{}, error) {
-	record := this.records[this.index]
-	return record.Scan(into)
-}
-
-func (this *RecordReader) MustScan(into interface{}) interface{} {
-	record := this.records[this.index]
-	return record.MustScan(into)
 }

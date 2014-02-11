@@ -1,8 +1,8 @@
 package server
 
 import (
+	. "github.com/motain/gocheck"
 	"io/ioutil"
-	. "launchpad.net/gocheck"
 	"net/http"
 	"net/http/httptest"
 	"testing"

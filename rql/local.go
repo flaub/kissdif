@@ -30,7 +30,7 @@ func (this *localConn) putDb(name string, db driver.Database) {
 	this.dbs[name] = db
 }
 
-func (this *localConn) CreateDB(name, driverName string, config kissdif.Dictionary) (Database, *kissdif.Error) {
+func (this *localConn) CreateDB(name, driverName string, config kissdif.Dictionary) (Database, error) {
 	drv, err := driver.Open(driverName)
 	if err != nil {
 		return nil, err
@@ -43,20 +43,20 @@ func (this *localConn) CreateDB(name, driverName string, config kissdif.Dictiona
 	return newQuery(name), nil
 }
 
-func (this *localConn) DropDB(name string) *kissdif.Error {
+func (this *localConn) DropDB(name string) error {
 	return kissdif.NewError(http.StatusNotImplemented, "Not implemented")
 }
 
-func (this *localConn) get(impl queryImpl) (*kissdif.ResultSet, *kissdif.Error) {
-	db := this.getDb(impl.db)
+func (this *localConn) Get(impl QueryImpl) (*kissdif.ResultSet, error) {
+	db := this.getDb(impl.Db_)
 	if db == nil {
 		return nil, kissdif.NewError(http.StatusNotFound, "DB not found")
 	}
-	table, err := db.GetTable(impl.table, false)
+	table, err := db.GetTable(impl.Table_, false)
 	if err != nil {
 		return nil, err
 	}
-	ch, err := table.Get(&impl.query)
+	ch, err := table.Get(&impl.Query_)
 	if err != nil {
 		return nil, err
 	}
@@ -74,26 +74,26 @@ func (this *localConn) get(impl queryImpl) (*kissdif.ResultSet, *kissdif.Error) 
 	return result, nil
 }
 
-func (this *localConn) put(impl queryImpl) (string, *kissdif.Error) {
-	db := this.getDb(impl.db)
+func (this *localConn) Put(impl QueryImpl) (string, error) {
+	db := this.getDb(impl.Db_)
 	if db == nil {
 		return "", kissdif.NewError(http.StatusNotFound, "DB not found")
 	}
-	table, err := db.GetTable(impl.table, true)
+	table, err := db.GetTable(impl.Table_, true)
 	if err != nil {
 		return "", err
 	}
-	return table.Put(&impl.record)
+	return table.Put(&impl.Record_)
 }
 
-func (this *localConn) delete(impl queryImpl) *kissdif.Error {
-	db := this.getDb(impl.db)
+func (this *localConn) Delete(impl QueryImpl) error {
+	db := this.getDb(impl.Db_)
 	if db == nil {
 		return kissdif.NewError(http.StatusNotFound, "DB not found")
 	}
-	table, err := db.GetTable(impl.table, false)
+	table, err := db.GetTable(impl.Table_, false)
 	if err != nil {
 		return err
 	}
-	return table.Delete(impl.record.Id)
+	return table.Delete(impl.Record_.Id)
 }

@@ -4,8 +4,8 @@ import (
 	"database/sql"
 	. "github.com/flaub/kissdif"
 	"github.com/flaub/kissdif/driver/test"
+	. "github.com/motain/gocheck"
 	"io/ioutil"
-	. "launchpad.net/gocheck"
 	"os"
 	"testing"
 )

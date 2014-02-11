@@ -3,8 +3,7 @@ package test
 import (
 	. "github.com/flaub/kissdif"
 	. "github.com/flaub/kissdif/driver"
-	. "launchpad.net/gocheck"
-	"net/http"
+	. "github.com/motain/gocheck"
 )
 
 type TestSuite struct {
@@ -17,8 +16,8 @@ type TestSuite struct {
 
 type expectedQuery struct {
 	index    string
-	lower    *Bound
-	upper    *Bound
+	lower    Bound
+	upper    Bound
 	expected []string
 }
 
@@ -45,9 +44,12 @@ func (this *TestSuite) putRecordFull(id, rev, value string, keys IndexMap) strin
 }
 
 // mb = make bound
-func mb(value string, inclusive bool) *Bound {
-	return &Bound{inclusive, value}
+func mb(value string, inclusive bool) Bound {
+	return Bound{inclusive, value}
 }
+
+// ob = open bound
+var ob = Bound{}
 
 func (this *TestSuite) expect(test expectedQuery, expectedEof bool, limit uint) {
 	query := &Query{
@@ -92,13 +94,11 @@ func (this *TestSuite) TestBasic(c *C) {
 	this.c = c
 	query := &Query{}
 	_, err := this.table.Get(query)
-	c.Assert(err, ErrorMatches, "Invalid index")
-	c.Assert(err.Status, Equals, http.StatusBadRequest)
+	c.Assert(err.Code, Equals, EBadIndex)
 
 	query.Index = "_id"
 	_, err = this.table.Get(query)
-	c.Assert(err, ErrorMatches, "Invalid limit")
-	c.Assert(err.Status, Equals, http.StatusBadRequest)
+	c.Assert(err.Code, Equals, EBadParam)
 
 	query.Limit = 10
 	// query.Index = "_does_not_exist_"
@@ -115,7 +115,7 @@ func (this *TestSuite) TestBasic(c *C) {
 
 	this.putValues("a")
 	this.query(true, 10, []expectedQuery{
-		{"_id", nil, nil, []string{"a"}},
+		{"_id", ob, ob, []string{"a"}},
 	})
 }
 
@@ -124,16 +124,16 @@ func (this *TestSuite) TestLowerBound(c *C) {
 	this.putValues("b", "c", "d")
 
 	this.query(true, 10, []expectedQuery{
-		{"_id", mb("a", true), nil, []string{"b", "c", "d"}},
-		{"_id", mb("a", false), nil, []string{"b", "c", "d"}},
-		{"_id", mb("b", true), nil, []string{"b", "c", "d"}},
-		{"_id", mb("b", false), nil, []string{"c", "d"}},
-		{"_id", mb("c", true), nil, []string{"c", "d"}},
-		{"_id", mb("c", false), nil, []string{"d"}},
-		{"_id", mb("d", true), nil, []string{"d"}},
-		{"_id", mb("d", false), nil, []string{}},
-		{"_id", mb("e", true), nil, []string{}},
-		{"_id", mb("e", false), nil, []string{}},
+		{"_id", mb("a", true), ob, []string{"b", "c", "d"}},
+		{"_id", mb("a", false), ob, []string{"b", "c", "d"}},
+		{"_id", mb("b", true), ob, []string{"b", "c", "d"}},
+		{"_id", mb("b", false), ob, []string{"c", "d"}},
+		{"_id", mb("c", true), ob, []string{"c", "d"}},
+		{"_id", mb("c", false), ob, []string{"d"}},
+		{"_id", mb("d", true), ob, []string{"d"}},
+		{"_id", mb("d", false), ob, []string{}},
+		{"_id", mb("e", true), ob, []string{}},
+		{"_id", mb("e", false), ob, []string{}},
 	})
 }
 
@@ -142,16 +142,16 @@ func (this *TestSuite) TestUpperBound(c *C) {
 	this.putValues("b", "c", "d")
 
 	this.query(true, 10, []expectedQuery{
-		{"_id", nil, mb("a", true), []string{}},
-		{"_id", nil, mb("a", false), []string{}},
-		{"_id", nil, mb("b", true), []string{"b"}},
-		{"_id", nil, mb("b", false), []string{}},
-		{"_id", nil, mb("c", true), []string{"b", "c"}},
-		{"_id", nil, mb("c", false), []string{"b"}},
-		{"_id", nil, mb("d", true), []string{"b", "c", "d"}},
-		{"_id", nil, mb("d", false), []string{"b", "c"}},
-		{"_id", nil, mb("e", true), []string{"b", "c", "d"}},
-		{"_id", nil, mb("e", false), []string{"b", "c", "d"}},
+		{"_id", ob, mb("a", true), []string{}},
+		{"_id", ob, mb("a", false), []string{}},
+		{"_id", ob, mb("b", true), []string{"b"}},
+		{"_id", ob, mb("b", false), []string{}},
+		{"_id", ob, mb("c", true), []string{"b", "c"}},
+		{"_id", ob, mb("c", false), []string{"b"}},
+		{"_id", ob, mb("d", true), []string{"b", "c", "d"}},
+		{"_id", ob, mb("d", false), []string{"b", "c"}},
+		{"_id", ob, mb("e", true), []string{"b", "c", "d"}},
+		{"_id", ob, mb("e", false), []string{"b", "c", "d"}},
 	})
 }
 
@@ -198,11 +198,11 @@ func (this *TestSuite) TestAltKey(c *C) {
 	})
 
 	this.query(true, 10, []expectedQuery{
-		{"_id", nil, nil, []string{"a", "aa", "b", "c", "d", "e"}},
+		{"_id", ob, ob, []string{"a", "aa", "b", "c", "d", "e"}},
 		{"_id", mb("a", true), mb("a", true), []string{"a"}},
-		{"x", nil, nil, []string{"a", "aa", "b", "d", "e", "e"}},
-		{"y", nil, nil, []string{"a", "b"}},
-		{"c", nil, nil, []string{"c"}},
+		{"x", ob, ob, []string{"a", "aa", "b", "d", "e", "e"}},
+		{"y", ob, ob, []string{"a", "b"}},
+		{"c", ob, ob, []string{"c"}},
 		{"x", mb("a_x", true), mb("a_x", true), []string{"a", "aa"}},
 		{"x", mb("a", true), mb("c", true), []string{"a", "aa", "b"}},
 		{"x", mb("e_x1", true), mb("e_x1", true), []string{"e"}},
@@ -263,9 +263,9 @@ func (this *TestSuite) TestUpdates(c *C) {
 	this.putRecordFull("g", rev, "g", IndexMap{})
 
 	this.query(true, 10, []expectedQuery{
-		{"_id", nil, nil, []string{"a", "bb", "c", "d", "e", "f", "g"}},
-		{"x", nil, nil, []string{"a", "f", "bb", "c", "e"}},
-		{"y", nil, nil, []string{"a", "bb", "e"}},
+		{"_id", ob, ob, []string{"a", "bb", "c", "d", "e", "f", "g"}},
+		{"x", ob, ob, []string{"a", "f", "bb", "c", "e"}},
+		{"y", ob, ob, []string{"a", "bb", "e"}},
 	})
 }
 
@@ -273,13 +273,13 @@ func (this *TestSuite) TestLimit(c *C) {
 	this.c = c
 	this.putValues("1", "2", "3")
 	this.query(false, 1, []expectedQuery{
-		{"_id", nil, nil, []string{"1"}},
+		{"_id", ob, ob, []string{"1"}},
 	})
 	this.query(false, 2, []expectedQuery{
-		{"_id", nil, nil, []string{"1", "2"}},
+		{"_id", ob, ob, []string{"1", "2"}},
 	})
 	this.query(true, 3, []expectedQuery{
-		{"_id", nil, nil, []string{"1", "2", "3"}},
+		{"_id", ob, ob, []string{"1", "2", "3"}},
 	})
 }
 
@@ -291,19 +291,19 @@ func (this *TestSuite) TestDelete(c *C) {
 	})
 	this.c.Assert(this.table.Delete("a"), IsNil)
 	this.query(true, 10, []expectedQuery{
-		{"_id", nil, nil, []string{"b", "c"}},
-		{"x", nil, nil, []string{"c"}},
+		{"_id", ob, ob, []string{"b", "c"}},
+		{"x", ob, ob, []string{"c"}},
 	})
 	this.c.Assert(this.table.Delete("a"), IsNil)
 	this.c.Assert(this.table.Delete("b"), IsNil)
 	this.query(true, 10, []expectedQuery{
-		{"_id", nil, nil, []string{"c"}},
-		{"x", nil, nil, []string{"c"}},
+		{"_id", ob, ob, []string{"c"}},
+		{"x", ob, ob, []string{"c"}},
 	})
 	this.c.Assert(this.table.Delete("c"), IsNil)
 	this.query(true, 10, []expectedQuery{
-		{"_id", nil, nil, []string{}},
-		{"x", nil, nil, []string{}},
+		{"_id", ob, ob, []string{}},
+		{"x", ob, ob, []string{}},
 	})
 }
 
@@ -319,7 +319,7 @@ func (this *TestSuite) TestMVCC(c *C) {
 	cur, err := this.table.Put(record)
 	this.c.Assert(cur, Equals, "")
 	this.c.Assert(err, NotNil)
-	this.c.Assert(err.Status, Equals, http.StatusConflict)
+	this.c.Assert(err.Code, Equals, EConflict)
 
 	record = &Record{Id: "a", Rev: prev, Doc: "a"}
 	cur, err = this.table.Put(record)
@@ -336,5 +336,5 @@ func (this *TestSuite) TestMVCC(c *C) {
 	cur, err = this.table.Put(record)
 	this.c.Assert(cur, Equals, "")
 	this.c.Assert(err, NotNil)
-	this.c.Assert(err.Status, Equals, http.StatusConflict)
+	this.c.Assert(err.Code, Equals, EConflict)
 }

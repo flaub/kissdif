@@ -4,14 +4,14 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"github.com/flaub/ergo"
 	"github.com/flaub/kissdif"
 	"github.com/ugorji/go/codec"
 	"io"
-	"io/ioutil"
+	_ "log"
 	"net/http"
 	"net/url"
 	"strconv"
-	"strings"
 )
 
 var (
@@ -77,57 +77,58 @@ func newHttpConn(url string) *httpConn {
 	}
 }
 
-func (this *httpConn) makeUrl(impl queryImpl) string {
+func (this *httpConn) makeUrl(impl QueryImpl) string {
 	return fmt.Sprintf("%s/%s/%s/%s",
 		this.baseUrl,
-		url.QueryEscape(impl.db),
-		url.QueryEscape(impl.table),
-		url.QueryEscape(impl.query.Index))
+		url.QueryEscape(impl.Db_),
+		url.QueryEscape(impl.Table_),
+		url.QueryEscape(impl.Query_.Index))
 }
 
-func (this *httpConn) sendRequest(method, url string, v interface{}) (*http.Response, *kissdif.Error) {
+func (this *httpConn) sendRequest(method, url string, v interface{}) (*http.Response, error) {
 	var buf bytes.Buffer
 	err := this.formatter.Encoder(&buf).Encode(v)
 	if err != nil {
-		msg := fmt.Sprintf("Encoder error: %v", err)
-		return nil, kissdif.NewError(http.StatusBadRequest, msg)
+		return nil, ergo.Wrap(err)
 	}
 	req, err := http.NewRequest(method, url, &buf)
 	if err != nil {
-		msg := fmt.Sprintf("Bad request: %v", err)
-		return nil, kissdif.NewError(http.StatusBadRequest, msg)
+		return nil, ergo.Wrap(err)
 	}
 	req.Header.Set("Content-Type", this.formatter.ContentType())
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
-		msg := fmt.Sprintf("Client error: %v", err)
-		return nil, kissdif.NewError(http.StatusBadRequest, msg)
+		return nil, ergo.Wrap(err)
 	}
 	return resp, nil
 }
 
-func (this *httpConn) recvReply(resp *http.Response, v interface{}) *kissdif.Error {
+func (this *httpConn) recvReply(resp *http.Response, v interface{}) error {
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		body, err := ioutil.ReadAll(resp.Body)
+		var erg ergo.Error
+		err := this.formatter.Decoder(resp.Body).Decode(&erg)
 		if err != nil {
-			msg := fmt.Sprintf("Body error: %v", err)
-			return kissdif.NewError(http.StatusBadRequest, msg)
+			return ergo.Wrap(err)
 		}
-		msg := fmt.Sprintf("Server error: %v", strings.TrimSpace(string(body)))
-		return kissdif.NewError(resp.StatusCode, msg)
+		if erg.Domain == "" {
+			if resp.StatusCode == http.StatusNotFound {
+				return kissdif.NewError(kissdif.ENotFound)
+			}
+			return ergo.Wrap("Blank response from server.", "code", resp.StatusCode)
+		}
+		return &erg
 	}
 	if v != nil {
 		err := this.formatter.Decoder(resp.Body).Decode(v)
 		if err != nil {
-			msg := fmt.Sprintf("Decoder error: %v", err)
-			return kissdif.NewError(http.StatusNotAcceptable, msg)
+			return ergo.Wrap(err)
 		}
 	}
 	return nil
 }
 
-func (this *httpConn) roundTrip(method, url string, in, out interface{}) *kissdif.Error {
+func (this *httpConn) roundTrip(method, url string, in, out interface{}) error {
 	resp, err := this.sendRequest(method, url, in)
 	if err != nil {
 		return err
@@ -135,7 +136,7 @@ func (this *httpConn) roundTrip(method, url string, in, out interface{}) *kissdi
 	return this.recvReply(resp, out)
 }
 
-func (this *httpConn) CreateDB(name, driverName string, config kissdif.Dictionary) (Database, *kissdif.Error) {
+func (this *httpConn) CreateDB(name, driverName string, config kissdif.Dictionary) (Database, error) {
 	url := fmt.Sprintf("%s/%s", this.baseUrl, name)
 	dbcfg := &kissdif.DatabaseCfg{
 		Name:   name,
@@ -149,39 +150,40 @@ func (this *httpConn) CreateDB(name, driverName string, config kissdif.Dictionar
 	return newQuery(name), nil
 }
 
-func (this *httpConn) DropDB(name string) *kissdif.Error {
-	return kissdif.NewError(http.StatusNotImplemented, "Not implemented")
+func (this *httpConn) DropDB(name string) error {
+	return ergo.Wrap("Not implemented")
 }
 
 func (this *httpConn) RegisterType(name string, doc interface{}) {
 }
 
-func (this *httpConn) get(impl queryImpl) (*ResultSet, *kissdif.Error) {
+func (this *httpConn) Get(impl QueryImpl) (ResultSet, error) {
 	args := make(url.Values)
-	if impl.query.Limit != 0 {
-		args.Set("limit", strconv.Itoa(int(impl.query.Limit)))
+	query := impl.Query_
+	if query.Limit != 0 {
+		args.Set("limit", strconv.Itoa(int(query.Limit)))
 	}
-	if impl.query.Lower != nil && impl.query.Upper != nil &&
-		impl.query.Lower.Value == impl.query.Upper.Value {
-		args.Set("eq", impl.query.Lower.Value)
+	if query.Lower.IsDefined() && query.Upper.IsDefined() &&
+		query.Lower.Value == query.Upper.Value {
+		args.Set("eq", query.Lower.Value)
 	} else {
-		if impl.query.Lower != nil {
-			if impl.query.Lower.Inclusive {
-				args.Set("ge", impl.query.Lower.Value)
+		if query.Lower.IsDefined() {
+			if query.Lower.Inclusive {
+				args.Set("ge", query.Lower.Value)
 			} else {
-				args.Set("gt", impl.query.Lower.Value)
+				args.Set("gt", query.Lower.Value)
 			}
 		}
-		if impl.query.Upper != nil {
-			if impl.query.Upper.Inclusive {
-				args.Set("le", impl.query.Upper.Value)
+		if query.Upper.IsDefined() {
+			if query.Upper.Inclusive {
+				args.Set("le", query.Upper.Value)
 			} else {
-				args.Set("lt", impl.query.Upper.Value)
+				args.Set("lt", query.Upper.Value)
 			}
 		}
 	}
 	url := this.makeUrl(impl) + "?" + args.Encode()
-	var result ResultSet
+	var result ResultSetImpl
 	kerr := this.roundTrip("GET", url, nil, &result)
 	if kerr != nil {
 		return nil, kerr
@@ -189,17 +191,21 @@ func (this *httpConn) get(impl queryImpl) (*ResultSet, *kissdif.Error) {
 	return &result, nil
 }
 
-func (this *httpConn) put(impl queryImpl) (string, *kissdif.Error) {
-	url := this.makeUrl(impl) + "/" + url.QueryEscape(impl.record.Id)
+func (this *httpConn) Put(impl QueryImpl) (string, error) {
+	record := impl.Record_
+	if record.Id == "" {
+		return "", kissdif.NewError(kissdif.EBadParam, "name", "id", "value", record.Id)
+	}
+	url := this.makeUrl(impl) + "/" + url.QueryEscape(record.Id)
 	var rev string
-	kerr := this.roundTrip("PUT", url, impl.record, &rev)
+	kerr := this.roundTrip("PUT", url, record, &rev)
 	if kerr != nil {
 		return "", kerr
 	}
 	return rev, nil
 }
 
-func (this *httpConn) delete(impl queryImpl) *kissdif.Error {
-	url := this.makeUrl(impl) + "/" + url.QueryEscape(impl.record.Id)
+func (this *httpConn) Delete(impl QueryImpl) error {
+	url := this.makeUrl(impl) + "/" + url.QueryEscape(impl.Record_.Id)
 	return this.roundTrip("DELETE", url, nil, nil)
 }

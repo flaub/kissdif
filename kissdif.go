@@ -2,7 +2,6 @@ package kissdif
 
 import (
 	"fmt"
-	"log"
 )
 
 type Dictionary map[string]string
@@ -24,10 +23,14 @@ type Bound struct {
 	Value     string
 }
 
+func (this Bound) IsDefined() bool {
+	return this.Value != ""
+}
+
 type Query struct {
 	Index string
-	Lower *Bound
-	Upper *Bound
+	Lower Bound
+	Upper Bound
 	Limit uint
 }
 
@@ -41,11 +44,6 @@ type Record struct {
 	Keys    IndexMap    `json:",omitempty"`
 }
 
-type Error struct {
-	Status  int
-	Message string
-}
-
 func NewRecord(id, rev string, doc interface{}) *Record {
 	return &Record{
 		Id:   id,
@@ -55,30 +53,48 @@ func NewRecord(id, rev string, doc interface{}) *Record {
 	}
 }
 
-func (this *Record) AddKey(name, value string) *Record {
-	index, ok := this.Keys[name]
+func (this IndexMap) Add(name, value string) {
+	keys, ok := this[name]
 	if !ok {
-		index = []string{}
+		keys = []string{}
 	}
-	this.Keys[name] = append(index, value)
-	return this
+	// ignore duplicates
+	for _, v := range keys {
+		if v == value {
+			return
+		}
+	}
+	this[name] = append(keys, value)
 }
 
-func NewQuery(index string, lower, upper *Bound, limit uint) *Query {
+func (this IndexMap) Drop(name, value string) {
+	keys, ok := this[name]
+	if !ok {
+		return
+	}
+	for i, v := range keys {
+		if v == value {
+			this[name] = append(keys[:i], keys[i+1:]...)
+			return
+		}
+	}
+}
+
+func (this IndexMap) Clone() IndexMap {
+	keys := make(IndexMap)
+	for k, v := range this {
+		keys[k] = v
+	}
+	return keys
+}
+
+func NewQuery(index string, lower, upper Bound, limit uint) *Query {
 	return &Query{index, lower, upper, limit}
 }
 
 func NewQueryEQ(index, key string, limit uint) *Query {
-	bound := &Bound{true, key}
+	bound := Bound{true, key}
 	return &Query{index, bound, bound, limit}
-}
-
-func NewError(status int, message string) *Error {
-	return &Error{status, message}
-}
-
-func (this *Error) Error() string {
-	return this.Message
 }
 
 func (this *ResultSet) String() string {
@@ -105,7 +121,7 @@ func (this *ResultSet) String() string {
 
 func (this *Query) String() string {
 	str := fmt.Sprintf("[%d] ", this.Limit)
-	if this.Lower != nil {
+	if this.Lower.IsDefined() {
 		str += this.Lower.Value
 		if this.Lower.Inclusive {
 			str += " <= "
@@ -114,7 +130,7 @@ func (this *Query) String() string {
 		}
 	}
 	str += this.Index
-	if this.Upper != nil {
+	if this.Upper.IsDefined() {
 		if this.Upper.Inclusive {
 			str += " <= "
 		} else {
@@ -124,5 +140,3 @@ func (this *Query) String() string {
 	}
 	return str
 }
-
-var _ = log.Printf

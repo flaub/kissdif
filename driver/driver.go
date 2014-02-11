@@ -1,9 +1,8 @@
 package driver
 
 import (
-	"fmt"
+	"github.com/flaub/ergo"
 	. "github.com/flaub/kissdif"
-	"net/http"
 )
 
 var drivers = make(map[string]Driver)
@@ -21,28 +20,27 @@ func Register(name string, driver Driver) {
 	drivers[name] = driver
 }
 
-func Open(name string) (Driver, *Error) {
+func Open(name string) (Driver, *ergo.Error) {
 	driver, ok := drivers[name]
 	if !ok {
-		return nil, NewError(http.StatusNotFound,
-			fmt.Sprintf("kissdif: unknown driver %q (forgotten import?)", name))
+		return nil, NewError(EMissingDriver, "name", name)
 	}
 	return driver, nil
 }
 
 type Driver interface {
-	Configure(name string, config Dictionary) (Database, *Error)
+	Configure(name string, config Dictionary) (Database, *ergo.Error)
 }
 
 type Database interface {
 	Name() string
 	Driver() string
 	Config() Dictionary
-	GetTable(name string, create bool) (Table, *Error)
+	GetTable(name string, create bool) (Table, *ergo.Error)
 }
 
 type Table interface {
-	Get(query *Query) (chan (*Record), *Error)
-	Put(record *Record) (string, *Error)
-	Delete(id string) *Error
+	Get(query *Query) (chan (*Record), *ergo.Error)
+	Put(record *Record) (string, *ergo.Error)
+	Delete(id string) *ergo.Error
 }
